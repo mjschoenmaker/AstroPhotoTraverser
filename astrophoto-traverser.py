@@ -5,6 +5,11 @@ import csv
 import re
 from pathlib import Path
 from threading import Thread
+try:
+    import astropy.io.fits as fits
+    FITS_AVAILABLE = True
+except ImportError:
+    FITS_AVAILABLE = False
 
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
@@ -154,6 +159,9 @@ class AstroScannerApp(ctk.CTk):
                 match = FILE_REGEX.search(file_name)
                 if match:
                     meta = match.groupdict()
+                    # Invalidate camera if it matches invalid patterns (e.g., starts with 'gain')
+                    if meta.get('camera') and re.match(r'gain\d+', meta['camera'], re.IGNORECASE):
+                        meta['camera'] = None
                 else:
                     meta = {}
                     # tolerant individual field searches
@@ -188,6 +196,17 @@ class AstroScannerApp(ctk.CTk):
                                 if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
                                     meta['camera'] = candidate
 
+                # Try to read missing camera from FITS header
+                if FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
+                    try:
+                        with fits.open(str(path), mode='readonly') as hdul:
+                            header = hdul[0].header
+                            camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
+                            if camera:
+                                meta['camera'] = camera
+                    except Exception:
+                        pass  # silently ignore if can't read
+
                 # If still missing major metadata, log a skipped-file note but still include minimal info
                 if not meta:
                     self.log(f"Note: filename did not match expected patterns: {file_name}")
@@ -210,6 +229,17 @@ class AstroScannerApp(ctk.CTk):
                     filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
                 else:
                     filter_name = self.identify_filter(session_info or '')
+
+                # If filter still unknown, try to read from FITS header
+                if FITS_AVAILABLE and filter_name == "Broadband/Unknown":
+                    try:
+                        with fits.open(str(path), mode='readonly') as hdul:
+                            header = hdul[0].header
+                            filter_header = header.get('FILTER')
+                            if filter_header:
+                                filter_name = FILTER_KEYWORDS.get(filter_header.lower(), filter_header)
+                    except Exception:
+                        pass  # silently ignore if can't read
 
                 row = {
                     'Object': obj_name or 'Unknown',
