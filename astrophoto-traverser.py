@@ -167,6 +167,10 @@ class AstroScannerApp(ctk.CTk):
                         self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
                     continue
 
+                # Additionally, only include FIT files that start with "Light_"
+                if not file_name.startswith("Light_"):
+                    continue
+
                 row = {
                     'Object': obj_name or 'Unknown',
                     'Filter': self.identify_filter(session_info or ''),
