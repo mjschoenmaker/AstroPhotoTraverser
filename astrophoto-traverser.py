@@ -117,10 +117,27 @@ class AstroScannerApp(ctk.CTk):
             for idx, path in enumerate(file_list, start=1):
                 file_name = path.name
 
-                # Safer path component extraction using parents
-                session_info = path.parent.name if path.parent is not None else ''
-                telescope = path.parent.parent.name if path.parent and path.parent.parent else ''
-                obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
+                # Extract path components relative to selected root
+                try:
+                    rel_parts = path.relative_to(Path(self.selected_path)).parts
+                    num_parts = len(rel_parts)
+                    if num_parts >= 3:
+                        obj_name = rel_parts[0]
+                        if num_parts == 3:
+                            telescope = ''
+                            session_info = rel_parts[1]
+                        else:  # num_parts >= 4
+                            telescope = rel_parts[1]
+                            session_info = rel_parts[2]
+                    else:
+                        obj_name = ''
+                        telescope = ''
+                        session_info = path.parent.name if path.parent else ''
+                except ValueError:
+                    # If relative_to fails, fall back to old method
+                    session_info = path.parent.name if path.parent is not None else ''
+                    telescope = path.parent.parent.name if path.parent and path.parent.parent else ''
+                    obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
 
                 # Try the strict regex first, fall back to tolerant searches
                 match = FILE_REGEX.search(file_name)
