@@ -10,6 +10,7 @@ from threading import Thread
 FILTER_KEYWORDS = {
     'lextreme': 'L-Extreme',
     'l-pro': 'L-Pro',
+    'lpro': 'L-Pro',
     'uvir': 'UV/IR Cut',
     'uv/ir': 'UV/IR Cut',
     'ha': 'Ha',
@@ -98,7 +99,7 @@ class AstroScannerApp(ctk.CTk):
     def identify_filter(self, folder_name):
         folder_lower = folder_name.lower()
         for key, formal_name in FILTER_KEYWORDS.items():
-            if key in folder_lower:
+            if re.search(r'\b' + re.escape(key) + r'\b', folder_lower):
                 return formal_name
         return "Broadband/Unknown"
 
