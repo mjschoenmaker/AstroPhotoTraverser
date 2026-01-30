@@ -151,6 +151,7 @@ class AstroScannerApp(ctk.CTk):
                     gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
                     ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
                     temp_m = re.search(r'(?P<temp>-?[\d.]+)C', file_name)
+                    rot_m = re.search(r'(?P<rotation>\d+)deg', file_name)
 
                     if exp_m:
                         meta['exp'] = exp_m.group('exp')
@@ -162,6 +163,8 @@ class AstroScannerApp(ctk.CTk):
                         meta['timestamp'] = ts_m.group(0)
                     if temp_m:
                         meta['temp'] = temp_m.group('temp')
+                    if rot_m:
+                        meta['rotation'] = rot_m.group('rotation')
 
                     # Attempt to identify camera token: look through underscore-separated tokens
                     if 'camera' not in meta:
@@ -197,6 +200,7 @@ class AstroScannerApp(ctk.CTk):
                     'Bin': meta.get('bin', '1'),
                     'Gain': meta.get('gain', '0'),
                     'Temp': meta.get('temp', '0'),
+                    'Rotation': meta.get('rotation', ''),
                     'Timestamp': meta.get('timestamp', ''),
                     'Session Folder': session_info or '',
                     'Processed': 'No',

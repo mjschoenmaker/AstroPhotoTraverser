@@ -1,2 +1,5 @@
 astro_inventory.csv
-__pycache__/astrophoto-traverser.cpython-313.pyc
+astrophoto-traverser.spec
+__pycache__/
+build/
+dist/
