@@ -13,8 +13,17 @@ FILTER_KEYWORDS = {
     'uvir': 'UV/IR Cut',
     'uv/ir': 'UV/IR Cut',
     'ha': 'Ha',
+    'h': 'Ha',
     'oiii': 'OIII',
+    'o3': 'OIII',
+    'o': 'OIII',
     'sii': 'SII',
+    's2': 'SII',
+    's': 'SII',
+    'r': 'Red',
+    'g': 'Green',
+    'b': 'Blue',
+    'l': 'Luminance',
     'cls': 'CLS'
 }
 
@@ -22,6 +31,7 @@ FILE_REGEX = re.compile(
     r'_(?P<exp>[\d.]+)s'           # 180.0s
     r'_Bin(?P<bin>\d+)'            # Bin1
     r'_(?P<camera>[^_]+)'          # 294MC
+    r'(?:_(?P<filter>[^_]+))?'     # optional filter
     r'_gain(?P<gain>\d+)'          # gain120
     r'_(?P<timestamp>\d{8}-\d{6})' # 20250405-214232
     r'_(?P<temp>-?[\d.]+)C'        # -10.0C
@@ -166,14 +176,16 @@ class AstroScannerApp(ctk.CTk):
                     if rot_m:
                         meta['rotation'] = rot_m.group('rotation')
 
-                    # Attempt to identify camera token: look through underscore-separated tokens
+                    # Attempt to identify camera token: look for token after Bin
                     if 'camera' not in meta:
                         tokens = [t for t in re.split(r'[_\-]', file_name) if t]
-                        # find first token that looks like a camera id (letters+digits) and is not matched above
-                        for t in tokens:
-                            if re.match(r'^[A-Za-z0-9]+$', t) and not re.search(r'Bin\d+|gain\d+|\d{8}|\d+s', t, re.IGNORECASE):
-                                meta['camera'] = t
-                                break
+                        bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
+                        if bin_indices:
+                            bin_idx = bin_indices[0]
+                            if bin_idx + 1 < len(tokens):
+                                candidate = tokens[bin_idx + 1]
+                                if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
+                                    meta['camera'] = candidate
 
                 # If still missing major metadata, log a skipped-file note but still include minimal info
                 if not meta:
@@ -191,9 +203,16 @@ class AstroScannerApp(ctk.CTk):
                 if not file_name.startswith("Light_"):
                     continue
 
+                # Determine filter: prefer filename filter over session folder filter
+                filter_from_filename = meta.get('filter')
+                if filter_from_filename:
+                    filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
+                else:
+                    filter_name = self.identify_filter(session_info or '')
+
                 row = {
                     'Object': obj_name or 'Unknown',
-                    'Filter': self.identify_filter(session_info or ''),
+                    'Filter': filter_name,
                     'Camera': meta.get('camera', 'N/A'),
                     'Telescope': telescope or 'Unknown',
                     'Exposure': meta.get('exp', '0'),
