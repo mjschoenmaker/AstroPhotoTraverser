@@ -256,7 +256,6 @@ class AstroScannerApp(ctk.CTk):
                     'Rotation': meta.get('rotation', ''),
                     'Timestamp': meta.get('timestamp', ''),
                     'Session Folder': session_info or '',
-                    'Processed': 'No',
                     'Path': str(path)
                 }
                 data_rows.append(row)
