@@ -205,19 +205,9 @@ class AstroScannerApp(ctk.CTk):
                                 if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
                                     meta['camera'] = candidate
 
-                # Try to read missing camera from FITS header
-                if FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
-                    try:
-                        with fits.open(str(path), mode='readonly') as hdul:
-                            header = hdul[0].header
-                            camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
-                            with open('debug.log', 'a') as f:
-                                f.write(f"Header read for {file_name}: camera={camera}\n")
-                            if camera:
-                                meta['camera'] = camera
-                    except Exception as e:
-                        with open('debug.log', 'a') as f:
-                            f.write(f"Failed to read header for {file_name}: {e}\n")
+                    # Invalidate camera if it starts with ISO followed by digits
+                    if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
+                        meta['camera'] = None
 
                 # If still missing major metadata, log a skipped-file note but still include minimal info
                 if not meta:
@@ -235,7 +225,19 @@ class AstroScannerApp(ctk.CTk):
                 if not file_name.startswith("Light_"):
                     continue
 
-                # Determine filter: prefer filename filter over session folder filter
+                # Try to read missing camera from FITS header (only for files that pass checks)
+                if FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
+                    try:
+                        with fits.open(str(path), mode='readonly') as hdul:
+                            header = hdul[0].header
+                            camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
+                            with open('debug.log', 'a') as f:
+                                f.write(f"Header read for {file_name}: camera={camera}\n")
+                            if camera:
+                                meta['camera'] = camera
+                    except Exception as e:
+                        with open('debug.log', 'a') as f:
+                            f.write(f"Failed to read header for {file_name}: {e}\n")
                 filter_from_filename = meta.get('filter')
                 if filter_from_filename:
                     filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
