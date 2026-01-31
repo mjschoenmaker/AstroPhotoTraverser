@@ -19,9 +19,10 @@ except ImportError:
     exifread = None
     EXIF_AVAILABLE = False
 
-# Force PyInstaller to include astropy
+# Force PyInstaller to include astropy and exifread
 if False:
     import astropy.io.fits
+    import exifread
 
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
@@ -52,7 +53,7 @@ FILE_REGEX = re.compile(
     r'(?:_(?P<filter>[^_]+))?'     # optional filter
     r'_gain(?P<gain>\d+)'          # gain120
     r'_(?P<timestamp>\d{8}-\d{6})' # 20250405-214232
-    r'_(?P<temp>-?[\d.]+)C'        # -10.0C
+    r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C'        # -10C or -10.5C
 )
 
 # Matches folder names starting with YYYYMMDD or YYYY-MM-DD (also allows underscores)
@@ -143,6 +144,9 @@ class AstroScannerApp(ctk.CTk):
         
         data_rows = []
         session_to_camera = {}  # Cache camera per session
+        session_to_gain = {}    # Cache gain per session
+        session_to_exp = {}     # Cache exposure time per session
+        session_to_temp = {}    # Cache temperature per session
         try:
             # Look for fits and other image files
             fit_files = list(Path(self.selected_path).rglob('*.fit*'))
@@ -195,7 +199,7 @@ class AstroScannerApp(ctk.CTk):
                     bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
                     gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
                     ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
-                    temp_m = re.search(r'(?P<temp>-?[\d.]+)C', file_name)
+                    temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
                     rot_m = re.search(r'(?P<rotation>\d+)deg', file_name)
 
                     if exp_m:
@@ -231,6 +235,18 @@ class AstroScannerApp(ctk.CTk):
                     meta['camera'] = session_to_camera[session_info]
                 elif meta.get('camera'):
                     session_to_camera[session_info] = meta['camera']
+
+                # Use cached gain from session if available
+                if not meta.get('gain') and session_info in session_to_gain:
+                    meta['gain'] = session_to_gain[session_info]
+
+                # Use cached exposure time from session if available
+                if not meta.get('exp') and session_info in session_to_exp:
+                    meta['exp'] = session_to_exp[session_info]
+
+                # Use cached temperature from session if available
+                if not meta.get('temp') and session_info in session_to_temp:
+                    meta['temp'] = session_to_temp[session_info]
 
                 # If still missing major metadata, log a skipped-file note but still include minimal info
                 if not meta:
@@ -274,7 +290,37 @@ class AstroScannerApp(ctk.CTk):
                             if camera:
                                 meta['camera'] = str(camera)
                                 session_to_camera[session_info] = meta['camera']  # update cache
-                    except Exception:
+                            # Also try to get ISO for gain if missing and not cached for session
+                            if not meta.get('gain') and session_info not in session_to_gain:
+                                iso = tags.get('EXIF ISOSpeedRatings')
+                                if iso:
+                                    meta['gain'] = str(iso)
+                                    session_to_gain[session_info] = meta['gain']  # cache gain
+                            # Also try to get exposure time if missing and not cached for session
+                            if not meta.get('exp') and session_info not in session_to_exp:
+                                exp_time = tags.get('EXIF ExposureTime')
+                                if exp_time:
+                                    # Convert exposure time to seconds (e.g., "1/30" -> "0.0333")
+                                    exp_str = str(exp_time)
+                                    if '/' in exp_str:
+                                        num, den = exp_str.split('/')
+                                        try:
+                                            exp_seconds = float(num) / float(den)
+                                            meta['exp'] = f"{exp_seconds:.4f}".rstrip('0').rstrip('.')
+                                            session_to_exp[session_info] = meta['exp']  # cache exposure
+                                        except ValueError:
+                                            pass
+                                    else:
+                                        # Already in seconds format
+                                        meta['exp'] = exp_str
+                                        session_to_exp[session_info] = meta['exp']  # cache exposure
+                            # Also try to get temperature if missing and not cached for session
+                            if not meta.get('temp') and session_info not in session_to_temp:
+                                temp_tag = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
+                                if temp_tag:
+                                    meta['temp'] = str(temp_tag)
+                                    session_to_temp[session_info] = meta['temp']  # cache temperature
+                    except Exception as e:
                         with open('debug.log', 'a') as f:
                             f.write(f"Failed to read exif header for {file_name}: {e}\n")
 
