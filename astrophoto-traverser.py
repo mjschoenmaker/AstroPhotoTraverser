@@ -12,6 +12,13 @@ except ImportError:
     fits = None
     FITS_AVAILABLE = False
 
+try:
+    import exifread
+    EXIF_AVAILABLE = True
+except ImportError:
+    exifread = None
+    EXIF_AVAILABLE = False
+
 # Force PyInstaller to include astropy
 if False:
     import astropy.io.fits
@@ -122,6 +129,8 @@ class AstroScannerApp(ctk.CTk):
         with open('debug.log', 'a') as f:
             f.write(f"Python executable: {sys.executable}\n")
             f.write(f"FITS_AVAILABLE: {FITS_AVAILABLE}\n")
+            f.write(f"EXIF_AVAILABLE: {EXIF_AVAILABLE}\n")
+
         # Schedule UI changes on main thread
         try:
             self.after(0, lambda: self.scan_button.configure(state="disabled"))
@@ -133,14 +142,22 @@ class AstroScannerApp(ctk.CTk):
         self.log("Initializing scan...")
         
         data_rows = []
+        session_to_camera = {}  # Cache camera per session
         try:
-            # Look for fits and fit files
-            file_list = list(Path(self.selected_path).rglob('*.fit*'))
+            # Look for fits and other image files
+            fit_files = list(Path(self.selected_path).rglob('*.fit*'))
+            cr2_files = list(Path(self.selected_path).rglob('*.cr2'))
+            dng_files = list(Path(self.selected_path).rglob('*.dng'))
+            jpg_files = list(Path(self.selected_path).rglob('*.jpg'))
+            jpeg_files = list(Path(self.selected_path).rglob('*.jpeg'))
+            png_files = list(Path(self.selected_path).rglob('*.png'))
+            file_list = fit_files + cr2_files + dng_files + jpg_files + jpeg_files + png_files
             total_files = len(file_list)
-            self.log(f"Found {total_files} FITS files. Processing...")
+            self.log(f"Found {total_files} image files. Processing...")
 
             for idx, path in enumerate(file_list, start=1):
                 file_name = path.name
+                is_fit = file_name.lower().endswith(('.fit', '.fits'))
 
                 # Extract path components relative to selected root
                 try:
@@ -209,6 +226,12 @@ class AstroScannerApp(ctk.CTk):
                     if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
                         meta['camera'] = None
 
+                # Use cached camera from session if available
+                if not meta.get('camera') and session_info in session_to_camera:
+                    meta['camera'] = session_to_camera[session_info]
+                elif meta.get('camera'):
+                    session_to_camera[session_info] = meta['camera']
+
                 # If still missing major metadata, log a skipped-file note but still include minimal info
                 if not meta:
                     self.log(f"Note: filename did not match expected patterns: {file_name}")
@@ -221,23 +244,40 @@ class AstroScannerApp(ctk.CTk):
                         self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
                     continue
 
-                # Additionally, only include FIT files that start with "Light_"
-                if not file_name.startswith("Light_"):
+                # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_"
+                if not (file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
                     continue
 
-                # Try to read missing camera from FITS header (only for files that pass checks)
-                if FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
+                # Try to read missing camera from FITS header (only for FIT files that pass checks)
+                if is_fit and FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
                     try:
                         with fits.open(str(path), mode='readonly') as hdul:
                             header = hdul[0].header
                             camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
                             with open('debug.log', 'a') as f:
-                                f.write(f"Header read for {file_name}: camera={camera}\n")
+                                f.write(f"Fits header read for {file_name}: camera={camera}\n")
                             if camera:
                                 meta['camera'] = camera
+                                session_to_camera[session_info] = meta['camera']  # update cache
                     except Exception as e:
                         with open('debug.log', 'a') as f:
-                            f.write(f"Failed to read header for {file_name}: {e}\n")
+                            f.write(f"Failed to read fits header for {file_name}: {e}\n")
+
+                # Try to read missing camera from EXIF (for non-FIT files)
+                if not is_fit and EXIF_AVAILABLE and not meta.get('camera'):
+                    try:
+                        with open(str(path), 'rb') as f:
+                            tags = exifread.process_file(f)
+                            camera = tags.get('Image Model') or tags.get('EXIF Model')
+                            with open('debug.log', 'a') as f:
+                                f.write(f"Exif header read for {file_name}: camera={camera}\n")
+                            if camera:
+                                meta['camera'] = str(camera)
+                                session_to_camera[session_info] = meta['camera']  # update cache
+                    except Exception:
+                        with open('debug.log', 'a') as f:
+                            f.write(f"Failed to read exif header for {file_name}: {e}\n")
+
                 filter_from_filename = meta.get('filter')
                 if filter_from_filename:
                     filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)

@@ -3,3 +3,4 @@ astrophoto-traverser.spec
 __pycache__/
 build/
 dist/
+debug.log
