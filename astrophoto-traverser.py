@@ -9,7 +9,12 @@ try:
     import astropy.io.fits as fits
     FITS_AVAILABLE = True
 except ImportError:
+    fits = None
     FITS_AVAILABLE = False
+
+# Force PyInstaller to include astropy
+if False:
+    import astropy.io.fits
 
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
@@ -113,6 +118,10 @@ class AstroScannerApp(ctk.CTk):
         Thread(target=self.run_logic).start()
 
     def run_logic(self):
+        import sys
+        with open('debug.log', 'a') as f:
+            f.write(f"Python executable: {sys.executable}\n")
+            f.write(f"FITS_AVAILABLE: {FITS_AVAILABLE}\n")
         # Schedule UI changes on main thread
         try:
             self.after(0, lambda: self.scan_button.configure(state="disabled"))
@@ -202,10 +211,13 @@ class AstroScannerApp(ctk.CTk):
                         with fits.open(str(path), mode='readonly') as hdul:
                             header = hdul[0].header
                             camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
+                            with open('debug.log', 'a') as f:
+                                f.write(f"Header read for {file_name}: camera={camera}\n")
                             if camera:
                                 meta['camera'] = camera
-                    except Exception:
-                        pass  # silently ignore if can't read
+                    except Exception as e:
+                        with open('debug.log', 'a') as f:
+                            f.write(f"Failed to read header for {file_name}: {e}\n")
 
                 # If still missing major metadata, log a skipped-file note but still include minimal info
                 if not meta:
@@ -229,17 +241,6 @@ class AstroScannerApp(ctk.CTk):
                     filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
                 else:
                     filter_name = self.identify_filter(session_info or '')
-
-                # If filter still unknown, try to read from FITS header
-                if FITS_AVAILABLE and filter_name == "Broadband/Unknown":
-                    try:
-                        with fits.open(str(path), mode='readonly') as hdul:
-                            header = hdul[0].header
-                            filter_header = header.get('FILTER')
-                            if filter_header:
-                                filter_name = FILTER_KEYWORDS.get(filter_header.lower(), filter_header)
-                    except Exception:
-                        pass  # silently ignore if can't read
 
                 row = {
                     'Object': obj_name or 'Unknown',
