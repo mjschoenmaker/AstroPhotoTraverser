@@ -45,6 +45,7 @@ python astrophoto-traverser.py
 ```
 
 ## 🛠️ Build as Executable
+There is a Windows executable available in [releases](https://github.com/mjschoenmaker/AstroPhotoTraverser/releases) 
 
 To create a standalone `.exe` for Windows using PyInstaller:
 
