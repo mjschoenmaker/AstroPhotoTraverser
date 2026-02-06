@@ -47,13 +47,13 @@ FILTER_KEYWORDS = {
 }
 
 FILE_REGEX = re.compile(
-    r'_(?P<exp>[\d.]+)s'           # 180.0s
-    r'_Bin(?P<bin>\d+)'            # Bin1
-    r'_(?P<camera>[^_]+)'          # 294MC
-    r'(?:_(?P<filter>[^_]+))?'     # optional filter
-    r'_gain(?P<gain>\d+)'          # gain120
-    r'_(?P<timestamp>\d{8}-\d{6})' # 20250405-214232
-    r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C'        # -10C or -10.5C
+    r'_(?P<exp>[\d.]+)s'                # 180.0s
+    r'_Bin(?P<bin>\d+)'                 # Bin1
+    r'_(?P<camera>[^_]+)'               # 294MC
+    r'(?:_(?P<filter>[^_]+))?'          # optional filter
+    r'_gain(?P<gain>\d+)'               # gain120
+    r'_(?P<timestamp>\d{8}-\d{6})'      # 20250405-214232
+    r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C'  # -10C or -10.5C
 )
 
 # Matches folder names starting with YYYYMMDD or YYYY-MM-DD (also allows underscores)
@@ -200,7 +200,7 @@ class AstroScannerApp(ctk.CTk):
                     gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
                     ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
                     temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
-                    rot_m = re.search(r'(?P<rotation>\d+)deg', file_name)
+                    rot_m = re.search(r'_(?P<rotation>\d+)deg', file_name)
 
                     if exp_m:
                         meta['exp'] = exp_m.group('exp')
@@ -228,6 +228,11 @@ class AstroScannerApp(ctk.CTk):
 
                     # Invalidate camera if it starts with ISO followed by digits
                     if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
+                        meta['camera'] = None
+                    
+                    # Invalidate camera if it actually is a filter name
+                    if meta.get('camera') and meta['camera'].lower() in FILTER_KEYWORDS:
+                        meta['filter'] = meta['camera']  # move value to filter
                         meta['camera'] = None
 
                 # Use cached camera from session if available
@@ -260,10 +265,21 @@ class AstroScannerApp(ctk.CTk):
                         self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
                     continue
 
-                # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_"
+                # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_" 
+                lower_path_str = str(path).lower()
                 if not (file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
                     continue
+                # or that reside in a folder that include "darks","bias" or "flats"
+                if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
+                    continue
 
+                # Identify filter from session folder name if not in filename
+                filter_from_filename = meta.get('filter')
+                if filter_from_filename:
+                    filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
+                else:
+                    filter_name = self.identify_filter(session_info or '')
+                    
                 # Try to read missing camera from FITS header (only for FIT files that pass checks)
                 if is_fit and FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
                     try:
@@ -323,12 +339,6 @@ class AstroScannerApp(ctk.CTk):
                     except Exception as e:
                         with open('debug.log', 'a') as f:
                             f.write(f"Failed to read exif header for {file_name}: {e}\n")
-
-                filter_from_filename = meta.get('filter')
-                if filter_from_filename:
-                    filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
-                else:
-                    filter_name = self.identify_filter(session_info or '')
 
                 row = {
                     'Object': obj_name or 'Unknown',
