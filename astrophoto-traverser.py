@@ -31,8 +31,9 @@ class AstroScannerCore:
         data_rows = []
         total_files = len(file_list)
         for idx, path in enumerate(file_list, start=1):
-            # Send the update to the UI
-            self.progress(idx, total_files)
+            # Send the update to the UI every 50 files
+            if idx % 50 == 0 or idx == total_files:
+                self.progress(idx, total_files)
             
             file_name = path.name
             is_fit = file_name.lower().endswith(('.fit', '.fits'))
