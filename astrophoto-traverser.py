@@ -8,6 +8,235 @@ from threading import Thread
 
 import config
 
+class AstroScannerCore:
+    def __init__(self, log_callback=None, progress_callback=None):
+        self.log = log_callback or (lambda x: None)
+        self.progress = progress_callback or (lambda x, y: None)
+        self.session_to_camera = {}
+        self.session_to_gain = {}
+        self.session_to_exp = {}
+        self.session_to_temp = {} 
+
+    def scan_folder(self, root_path):
+        # The core engine that traverses files and extracts metadata.
+        root = Path(root_path)
+        fit_files = list(root.rglob('*.fit*'))
+        cr2_files = list(root.rglob('*.cr2'))
+        dng_files = list(root.rglob('*.dng'))
+        jpg_files = list(root.rglob('*.jpg'))
+        jpeg_files = list(root.rglob('*.jpeg'))
+        png_files = list(root.rglob('*.png'))
+        file_list = fit_files + cr2_files + dng_files + jpg_files + jpeg_files + png_files
+
+        data_rows = []
+        for idx, path in enumerate(file_list, start=1):
+            file_name = path.name
+            is_fit = file_name.lower().endswith(('.fit', '.fits'))
+
+            # Extract path components relative to selected root
+            try:
+                rel_parts = path.relative_to(Path(root)).parts
+                num_parts = len(rel_parts)
+                if num_parts >= 3:
+                    obj_name = rel_parts[0]
+                    if num_parts == 3:
+                        telescope = ''
+                        session_info = rel_parts[1]
+                    else:  # num_parts >= 4
+                        telescope = rel_parts[1]
+                        session_info = rel_parts[2]
+                else:
+                    obj_name = ''
+                    telescope = ''
+                    session_info = path.parent.name if path.parent else ''
+            except ValueError:
+                # If relative_to fails, fall back to old method
+                session_info = path.parent.name if path.parent is not None else ''
+                telescope = path.parent.parent.name if path.parent and path.parent.parent else ''
+                obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
+
+            # Try the strict regex first, fall back to tolerant searches
+            match = config.FILE_REGEX.search(file_name)
+            if match:
+                meta = match.groupdict()
+                # Invalidate camera if it matches invalid patterns (e.g., starts with 'gain')
+                if meta.get('camera') and re.match(r'gain\d+', meta['camera'], re.IGNORECASE):
+                    meta['camera'] = None
+            else:
+                meta = {}
+                # tolerant individual field searches
+                exp_m = re.search(r'(?P<exp>[\d.]+)s', file_name)
+                bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
+                gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
+                ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
+                temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
+                rot_m = re.search(r'_(?P<rotation>\d+)deg', file_name)
+
+                if exp_m:
+                    meta['exp'] = exp_m.group('exp')
+                if bin_m:
+                    meta['bin'] = bin_m.group('bin')
+                if gain_m:
+                    meta['gain'] = gain_m.group('gain')
+                if ts_m:
+                    meta['timestamp'] = ts_m.group(0)
+                if temp_m:
+                    meta['temp'] = temp_m.group('temp')
+                if rot_m:
+                    meta['rotation'] = rot_m.group('rotation')
+
+                # Attempt to identify camera token: look for token after Bin
+                if 'camera' not in meta:
+                    tokens = [t for t in re.split(r'[_\-]', file_name) if t]
+                    bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
+                    if bin_indices:
+                        bin_idx = bin_indices[0]
+                        if bin_idx + 1 < len(tokens):
+                            candidate = tokens[bin_idx + 1]
+                            if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
+                                meta['camera'] = candidate
+
+                # Invalidate camera if it starts with ISO followed by digits
+                if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
+                    meta['camera'] = None
+                
+                # Invalidate camera if it actually is a filter name
+                if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
+                    meta['filter'] = meta['camera']  # move value to filter
+                    meta['camera'] = None
+
+            # Use cached camera from session if available
+            if not meta.get('camera') and session_info in self.session_to_camera:
+                meta['camera'] = self.session_to_camera[session_info]
+            elif meta.get('camera'):
+                self.session_to_camera[session_info] = meta['camera']
+
+            # Use cached gain from session if available
+            if not meta.get('gain') and session_info in self.session_to_gain:
+                meta['gain'] = self.session_to_gain[session_info]
+
+            # Use cached exposure time from session if available
+            if not meta.get('exp') and session_info in self.session_to_exp:
+                meta['exp'] = self.session_to_exp[session_info]
+            # Use cached temperature from session if available
+            if not meta.get('temp') and session_info in self.session_to_temp:
+                meta['temp'] = self.session_to_temp[session_info]
+
+            # If still missing major metadata, log a skipped-file note but still include minimal info
+            if not meta:
+                self.log(f"Note: filename did not match expected patterns: {file_name}")
+
+            # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
+            parent_name = (session_info or '').strip()
+            if not config.DATE_FOLDER_RE.match(parent_name):
+                # occasionally log skipped non-date folders
+                if idx % 100 == 0:
+                    self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
+                continue
+
+            # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_" 
+            lower_path_str = str(path).lower()
+            if not (file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
+                continue
+            # or that reside in a folder that include "darks","bias" or "flats"
+            if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
+                continue
+
+            # Identify filter from session folder name if not in filename
+            filter_from_filename = meta.get('filter')
+            if filter_from_filename:
+                filter_name = config.FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
+            else:
+                filter_name = config.identify_filter(session_info or '')
+                
+            # Try to read missing camera from FITS header (only for FIT files that pass checks)
+            if is_fit and config.FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
+                try:
+                    with config.fits.open(str(path), mode='readonly') as hdul:
+                        header = hdul[0].header
+                        camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
+                        with open('debug.log', 'a') as f:
+                            f.write(f"Fits header read for {file_name}: camera={camera}\n")
+                        if camera:
+                            meta['camera'] = camera
+                            self.session_to_camera[session_info] = meta['camera']  # update cache
+                except Exception as e:
+                    with open('debug.log', 'a') as f:
+                        f.write(f"Failed to read fits header for {file_name}: {e}\n")
+
+            # Try to read missing camera from EXIF (for non-FIT files)
+            if not is_fit and config.EXIF_AVAILABLE and not meta.get('camera'):
+                try:
+                    with open(str(path), 'rb') as f:
+                        tags = config.exifread.process_file(f)
+                        camera = tags.get('Image Model') or tags.get('EXIF Model')
+                        with open('debug.log', 'a') as f:
+                            f.write(f"Exif header read for {file_name}: camera={camera}\n")
+                        if camera:
+                            meta['camera'] = str(camera)
+                            self.session_to_camera[session_info] = meta['camera']  # update cache
+                        # Also try to get ISO for gain if missing and not cached for session
+                        if not meta.get('gain') and session_info not in self.session_to_gain:
+                            iso = tags.get('EXIF ISOSpeedRatings')
+                            if iso:
+                                meta['gain'] = str(iso)
+                                self.session_to_gain[session_info] = meta['gain']  # cache gain
+                        # Also try to get exposure time if missing and not cached for session
+                        if not meta.get('exp') and session_info not in self.session_to_exp:
+                            exp_time = tags.get('EXIF ExposureTime')
+                            if exp_time:
+                                # Convert exposure time to seconds (e.g., "1/30" -> "0.0333")
+                                exp_str = str(exp_time)
+                                if '/' in exp_str:
+                                    num, den = exp_str.split('/')
+                                    try:
+                                        exp_seconds = float(num) / float(den)
+                                        meta['exp'] = f"{exp_seconds:.4f}".rstrip('0').rstrip('.')
+                                        self.session_to_exp[session_info] = meta['exp']  # cache exposure
+                                    except ValueError:
+                                        pass
+                                else:
+                                    # Already in seconds format
+                                    meta['exp'] = exp_str
+                                    self.session_to_exp[session_info] = meta['exp']  # cache exposure
+                        # Also try to get temperature if missing and not cached for session
+                        if not meta.get('temp') and session_info not in self.session_to_temp:
+                            temp_tag = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
+                            if temp_tag:
+                                meta['temp'] = str(temp_tag)
+                                self.session_to_temp[session_info] = meta['temp']  # cache temperature
+                except Exception as e:
+                    with open('debug.log', 'a') as f:
+                        f.write(f"Failed to read exif header for {file_name}: {e}\n")
+
+            row = {
+                'Object': obj_name or 'Unknown',
+                'Filter': filter_name,
+                'Camera': meta.get('camera', 'N/A'),
+                'Telescope': telescope or 'Unknown',
+                'Exposure': meta.get('exp', '0'),
+                'Bin': meta.get('bin', '1'),
+                'Gain': meta.get('gain', '0'),
+                'Temp': meta.get('temp', '0'),
+                'Rotation': meta.get('rotation', ''),
+                'Timestamp': meta.get('timestamp', ''),
+                'Session Folder': session_info or '',
+                'Path': str(path)
+            }
+            data_rows.append(row)
+        
+        return data_rows
+    
+    def save_to_csv(self, data_rows, output_path):
+        """Handles the file IO for CSV generation."""
+        if not data_rows:
+            return
+        keys = data_rows[0].keys()
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            dict_writer = csv.DictWriter(f, fieldnames=keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(data_rows)
+
 class AstroScannerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
@@ -63,11 +292,14 @@ class AstroScannerApp(ctk.CTk):
             self.scan_button.configure(state="normal")
             self.log(f"Target set to: {self.selected_path}")
 
-
-
     def start_scan_thread(self):
-        # Run in a separate thread so the GUI doesn't freeze
-        Thread(target=self.run_logic).start()
+        if not hasattr(self, 'selected_path') or not self.selected_path:
+            self.after(0, lambda: messagebox.showwarning("Warning", "Please select a folder first!"))
+            return
+    
+        # Start the background thread
+        thread = Thread(target=self.run_logic, daemon=True)
+        thread.start()
 
     def run_logic(self):
         import sys
@@ -76,281 +308,40 @@ class AstroScannerApp(ctk.CTk):
             f.write(f"FITS_AVAILABLE: {config.FITS_AVAILABLE}\n")
             f.write(f"EXIF_AVAILABLE: {config.EXIF_AVAILABLE}\n")
 
-        # Schedule UI changes on main thread
-        try:
-            self.after(0, lambda: self.scan_button.configure(state="disabled"))
-        except Exception:
-            try:
-                self.scan_button.configure(state="disabled")
-            except Exception:
-                pass
+        # 1. Update UI state to 'Processing' mode
+        self.after(0, lambda: self.scan_button.configure(state="disabled"))
         self.log("Initializing scan...")
-        
-        data_rows = []
-        session_to_camera = {}  # Cache camera per session
-        session_to_gain = {}    # Cache gain per session
-        session_to_exp = {}     # Cache exposure time per session
-        session_to_temp = {}    # Cache temperature per session
+
+        # 2. Instantiate the logic engine with callbacks 
+        # This allows the logic to 'talk' to the UI without being 'part' of it
+        core = AstroScannerCore(
+            log_callback=self.log,
+            progress_callback=lambda current, total: self.log(f"Processing {current}/{total}")
+        )
+
         try:
-            # Look for fits and other image files
-            fit_files = list(Path(self.selected_path).rglob('*.fit*'))
-            cr2_files = list(Path(self.selected_path).rglob('*.cr2'))
-            dng_files = list(Path(self.selected_path).rglob('*.dng'))
-            jpg_files = list(Path(self.selected_path).rglob('*.jpg'))
-            jpeg_files = list(Path(self.selected_path).rglob('*.jpeg'))
-            png_files = list(Path(self.selected_path).rglob('*.png'))
-            file_list = fit_files + cr2_files + dng_files + jpg_files + jpeg_files + png_files
-            total_files = len(file_list)
-            self.log(f"Found {total_files} image files. Processing...")
-
-            for idx, path in enumerate(file_list, start=1):
-                file_name = path.name
-                is_fit = file_name.lower().endswith(('.fit', '.fits'))
-
-                # Extract path components relative to selected root
-                try:
-                    rel_parts = path.relative_to(Path(self.selected_path)).parts
-                    num_parts = len(rel_parts)
-                    if num_parts >= 3:
-                        obj_name = rel_parts[0]
-                        if num_parts == 3:
-                            telescope = ''
-                            session_info = rel_parts[1]
-                        else:  # num_parts >= 4
-                            telescope = rel_parts[1]
-                            session_info = rel_parts[2]
-                    else:
-                        obj_name = ''
-                        telescope = ''
-                        session_info = path.parent.name if path.parent else ''
-                except ValueError:
-                    # If relative_to fails, fall back to old method
-                    session_info = path.parent.name if path.parent is not None else ''
-                    telescope = path.parent.parent.name if path.parent and path.parent.parent else ''
-                    obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
-
-                # Try the strict regex first, fall back to tolerant searches
-                match = config.FILE_REGEX.search(file_name)
-                if match:
-                    meta = match.groupdict()
-                    # Invalidate camera if it matches invalid patterns (e.g., starts with 'gain')
-                    if meta.get('camera') and re.match(r'gain\d+', meta['camera'], re.IGNORECASE):
-                        meta['camera'] = None
-                else:
-                    meta = {}
-                    # tolerant individual field searches
-                    exp_m = re.search(r'(?P<exp>[\d.]+)s', file_name)
-                    bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
-                    gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
-                    ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
-                    temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
-                    rot_m = re.search(r'_(?P<rotation>\d+)deg', file_name)
-
-                    if exp_m:
-                        meta['exp'] = exp_m.group('exp')
-                    if bin_m:
-                        meta['bin'] = bin_m.group('bin')
-                    if gain_m:
-                        meta['gain'] = gain_m.group('gain')
-                    if ts_m:
-                        meta['timestamp'] = ts_m.group(0)
-                    if temp_m:
-                        meta['temp'] = temp_m.group('temp')
-                    if rot_m:
-                        meta['rotation'] = rot_m.group('rotation')
-
-                    # Attempt to identify camera token: look for token after Bin
-                    if 'camera' not in meta:
-                        tokens = [t for t in re.split(r'[_\-]', file_name) if t]
-                        bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
-                        if bin_indices:
-                            bin_idx = bin_indices[0]
-                            if bin_idx + 1 < len(tokens):
-                                candidate = tokens[bin_idx + 1]
-                                if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
-                                    meta['camera'] = candidate
-
-                    # Invalidate camera if it starts with ISO followed by digits
-                    if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
-                        meta['camera'] = None
-                    
-                    # Invalidate camera if it actually is a filter name
-                    if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
-                        meta['filter'] = meta['camera']  # move value to filter
-                        meta['camera'] = None
-
-                # Use cached camera from session if available
-                if not meta.get('camera') and session_info in session_to_camera:
-                    meta['camera'] = session_to_camera[session_info]
-                elif meta.get('camera'):
-                    session_to_camera[session_info] = meta['camera']
-
-                # Use cached gain from session if available
-                if not meta.get('gain') and session_info in session_to_gain:
-                    meta['gain'] = session_to_gain[session_info]
-
-                # Use cached exposure time from session if available
-                if not meta.get('exp') and session_info in session_to_exp:
-                    meta['exp'] = session_to_exp[session_info]
-
-                # Use cached temperature from session if available
-                if not meta.get('temp') and session_info in session_to_temp:
-                    meta['temp'] = session_to_temp[session_info]
-
-                # If still missing major metadata, log a skipped-file note but still include minimal info
-                if not meta:
-                    self.log(f"Note: filename did not match expected patterns: {file_name}")
-
-                # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
-                parent_name = (session_info or '').strip()
-                if not config.DATE_FOLDER_RE.match(parent_name):
-                    # occasionally log skipped non-date folders
-                    if idx % 100 == 0:
-                        self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
-                    continue
-
-                # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_" 
-                lower_path_str = str(path).lower()
-                if not (file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
-                    continue
-                # or that reside in a folder that include "darks","bias" or "flats"
-                if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
-                    continue
-
-                # Identify filter from session folder name if not in filename
-                filter_from_filename = meta.get('filter')
-                if filter_from_filename:
-                    filter_name = config.FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
-                else:
-                    filter_name = config.identify_filter(session_info or '')
-                    
-                # Try to read missing camera from FITS header (only for FIT files that pass checks)
-                if is_fit and config.FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
-                    try:
-                        with config.fits.open(str(path), mode='readonly') as hdul:
-                            header = hdul[0].header
-                            camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
-                            with open('debug.log', 'a') as f:
-                                f.write(f"Fits header read for {file_name}: camera={camera}\n")
-                            if camera:
-                                meta['camera'] = camera
-                                session_to_camera[session_info] = meta['camera']  # update cache
-                    except Exception as e:
-                        with open('debug.log', 'a') as f:
-                            f.write(f"Failed to read fits header for {file_name}: {e}\n")
-
-                # Try to read missing camera from EXIF (for non-FIT files)
-                if not is_fit and config.EXIF_AVAILABLE and not meta.get('camera'):
-                    try:
-                        with open(str(path), 'rb') as f:
-                            tags = config.exifread.process_file(f)
-                            camera = tags.get('Image Model') or tags.get('EXIF Model')
-                            with open('debug.log', 'a') as f:
-                                f.write(f"Exif header read for {file_name}: camera={camera}\n")
-                            if camera:
-                                meta['camera'] = str(camera)
-                                session_to_camera[session_info] = meta['camera']  # update cache
-                            # Also try to get ISO for gain if missing and not cached for session
-                            if not meta.get('gain') and session_info not in session_to_gain:
-                                iso = tags.get('EXIF ISOSpeedRatings')
-                                if iso:
-                                    meta['gain'] = str(iso)
-                                    session_to_gain[session_info] = meta['gain']  # cache gain
-                            # Also try to get exposure time if missing and not cached for session
-                            if not meta.get('exp') and session_info not in session_to_exp:
-                                exp_time = tags.get('EXIF ExposureTime')
-                                if exp_time:
-                                    # Convert exposure time to seconds (e.g., "1/30" -> "0.0333")
-                                    exp_str = str(exp_time)
-                                    if '/' in exp_str:
-                                        num, den = exp_str.split('/')
-                                        try:
-                                            exp_seconds = float(num) / float(den)
-                                            meta['exp'] = f"{exp_seconds:.4f}".rstrip('0').rstrip('.')
-                                            session_to_exp[session_info] = meta['exp']  # cache exposure
-                                        except ValueError:
-                                            pass
-                                    else:
-                                        # Already in seconds format
-                                        meta['exp'] = exp_str
-                                        session_to_exp[session_info] = meta['exp']  # cache exposure
-                            # Also try to get temperature if missing and not cached for session
-                            if not meta.get('temp') and session_info not in session_to_temp:
-                                temp_tag = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
-                                if temp_tag:
-                                    meta['temp'] = str(temp_tag)
-                                    session_to_temp[session_info] = meta['temp']  # cache temperature
-                    except Exception as e:
-                        with open('debug.log', 'a') as f:
-                            f.write(f"Failed to read exif header for {file_name}: {e}\n")
-
-                row = {
-                    'Object': obj_name or 'Unknown',
-                    'Filter': filter_name,
-                    'Camera': meta.get('camera', 'N/A'),
-                    'Telescope': telescope or 'Unknown',
-                    'Exposure': meta.get('exp', '0'),
-                    'Bin': meta.get('bin', '1'),
-                    'Gain': meta.get('gain', '0'),
-                    'Temp': meta.get('temp', '0'),
-                    'Rotation': meta.get('rotation', ''),
-                    'Timestamp': meta.get('timestamp', ''),
-                    'Session Folder': session_info or '',
-                    'Path': str(path)
-                }
-                data_rows.append(row)
-
-                # Progress logging every 50 files
-                if idx % 50 == 0 or idx == total_files:
-                    pct = (idx / total_files) * 100 if total_files else 100
-                    self.log(f"Processed {idx}/{total_files} files ({pct:.1f}%)")
-
-            # If nothing was indexed, inform the user and skip creating CSV
-            if not data_rows:
-                self.log("No FITS files indexed; CSV not created.")
-                try:
-                    self.after(0, lambda: messagebox.showinfo("Done", "No FITS files found; CSV not created."))
-                except Exception:
-                    messagebox.showinfo("Done", "No FITS files found; CSV not created.")
-                try:
-                    self.after(0, lambda: self.scan_button.configure(state="normal"))
-                except Exception:
-                    try:
-                        self.scan_button.configure(state="normal")
-                    except Exception:
-                        pass
+            # 3. Execute logic
+            data = core.scan_folder(self.selected_path)
+            if not data:
+                self.after(0, lambda: messagebox.showwarning("No Data", "No compatible files were found."))
                 return
 
-            # Save to CSV in the same folder as the script
+            # 4. Save results        
             output_file = os.path.join(os.getcwd(), "astro_inventory.csv")
-            keys = data_rows[0].keys()
-            with open(output_file, 'w', newline='', encoding='utf-8') as f:
-                dict_writer = csv.DictWriter(f, fieldnames=keys)
-                dict_writer.writeheader()
-                dict_writer.writerows(data_rows)
-
-            self.log(f"SUCCESS: {len(data_rows)} files indexed.")
-            self.log(f"Saved to: {output_file}")
-            try:
-                self.after(0, lambda: messagebox.showinfo("Done", f"Scan complete!\nCSV saved to: {output_file}"))
-            except Exception:
-                messagebox.showinfo("Done", f"Scan complete!\nCSV saved to: {output_file}")
-
+            core.save_to_csv(data, output_file)
+            
+            # 5. Notify UI of completion
+            self.log(f"SUCCESS: {len(data)} files indexed.")
+            self.after(0, lambda: messagebox.showinfo("Done", f"Scan complete!\nSaved to: {output_file}"))
+        
         except Exception as e:
+            # 6. Error handling
             self.log(f"ERROR: {str(e)}")
-            try:
-                self.after(0, lambda: messagebox.showerror("Error", f"An error occurred: {e}"))
-            except Exception:
-                messagebox.showerror("Error", f"An error occurred: {e}")
+            self.after(0, lambda: messagebox.showerror("Error", f"An error occurred: {e}"))
 
-        # Ensure the scan button is re-enabled on the main thread
-        try:
+            # 7. Ensure scan button is re-enabled even if error occurs
+        finally:
             self.after(0, lambda: self.scan_button.configure(state="normal"))
-        except Exception:
-            try:
-                self.scan_button.configure(state="normal")
-            except Exception:
-                pass
 
 if __name__ == "__main__":
     app = AstroScannerApp()
