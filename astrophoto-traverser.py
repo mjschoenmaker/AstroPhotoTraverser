@@ -5,59 +5,8 @@ import csv
 import re
 from pathlib import Path
 from threading import Thread
-try:
-    import astropy.io.fits as fits
-    FITS_AVAILABLE = True
-except ImportError:
-    fits = None
-    FITS_AVAILABLE = False
 
-try:
-    import exifread
-    EXIF_AVAILABLE = True
-except ImportError:
-    exifread = None
-    EXIF_AVAILABLE = False
-
-# Force PyInstaller to include astropy and exifread
-if False:
-    import astropy.io.fits
-    import exifread
-
-# --- GLOBAL CONFIGURATION ---
-FILTER_KEYWORDS = {
-    'lextreme': 'L-Extreme',
-    'l-pro': 'L-Pro',
-    'lpro': 'L-Pro',
-    'uvir': 'UV/IR Cut',
-    'uv/ir': 'UV/IR Cut',
-    'ha': 'Ha',
-    'h': 'Ha',
-    'oiii': 'OIII',
-    'o3': 'OIII',
-    'o': 'OIII',
-    'sii': 'SII',
-    's2': 'SII',
-    's': 'SII',
-    'r': 'Red',
-    'g': 'Green',
-    'b': 'Blue',
-    'l': 'Luminance',
-    'cls': 'CLS'
-}
-
-FILE_REGEX = re.compile(
-    r'_(?P<exp>[\d.]+)s'                # 180.0s
-    r'_Bin(?P<bin>\d+)'                 # Bin1
-    r'_(?P<camera>[^_]+)'               # 294MC
-    r'(?:_(?P<filter>[^_]+))?'          # optional filter
-    r'_gain(?P<gain>\d+)'               # gain120
-    r'_(?P<timestamp>\d{8}-\d{6})'      # 20250405-214232
-    r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C'  # -10C or -10.5C
-)
-
-# Matches folder names starting with YYYYMMDD or YYYY-MM-DD (also allows underscores)
-DATE_FOLDER_RE = re.compile(r'^\d{4}[-_]?\d{2}[-_]?\d{2}')
+import config
 
 class AstroScannerApp(ctk.CTk):
     def __init__(self):
@@ -114,12 +63,7 @@ class AstroScannerApp(ctk.CTk):
             self.scan_button.configure(state="normal")
             self.log(f"Target set to: {self.selected_path}")
 
-    def identify_filter(self, folder_name):
-        folder_lower = folder_name.lower()
-        for key, formal_name in FILTER_KEYWORDS.items():
-            if re.search(r'\b' + re.escape(key) + r'\b', folder_lower):
-                return formal_name
-        return "Broadband/Unknown"
+
 
     def start_scan_thread(self):
         # Run in a separate thread so the GUI doesn't freeze
@@ -129,8 +73,8 @@ class AstroScannerApp(ctk.CTk):
         import sys
         with open('debug.log', 'a') as f:
             f.write(f"Python executable: {sys.executable}\n")
-            f.write(f"FITS_AVAILABLE: {FITS_AVAILABLE}\n")
-            f.write(f"EXIF_AVAILABLE: {EXIF_AVAILABLE}\n")
+            f.write(f"FITS_AVAILABLE: {config.FITS_AVAILABLE}\n")
+            f.write(f"EXIF_AVAILABLE: {config.EXIF_AVAILABLE}\n")
 
         # Schedule UI changes on main thread
         try:
@@ -186,7 +130,7 @@ class AstroScannerApp(ctk.CTk):
                     obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
 
                 # Try the strict regex first, fall back to tolerant searches
-                match = FILE_REGEX.search(file_name)
+                match = config.FILE_REGEX.search(file_name)
                 if match:
                     meta = match.groupdict()
                     # Invalidate camera if it matches invalid patterns (e.g., starts with 'gain')
@@ -231,7 +175,7 @@ class AstroScannerApp(ctk.CTk):
                         meta['camera'] = None
                     
                     # Invalidate camera if it actually is a filter name
-                    if meta.get('camera') and meta['camera'].lower() in FILTER_KEYWORDS:
+                    if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
                         meta['filter'] = meta['camera']  # move value to filter
                         meta['camera'] = None
 
@@ -259,7 +203,7 @@ class AstroScannerApp(ctk.CTk):
 
                 # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
                 parent_name = (session_info or '').strip()
-                if not DATE_FOLDER_RE.match(parent_name):
+                if not config.DATE_FOLDER_RE.match(parent_name):
                     # occasionally log skipped non-date folders
                     if idx % 100 == 0:
                         self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
@@ -276,14 +220,14 @@ class AstroScannerApp(ctk.CTk):
                 # Identify filter from session folder name if not in filename
                 filter_from_filename = meta.get('filter')
                 if filter_from_filename:
-                    filter_name = FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
+                    filter_name = config.FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
                 else:
-                    filter_name = self.identify_filter(session_info or '')
+                    filter_name = config.identify_filter(session_info or '')
                     
                 # Try to read missing camera from FITS header (only for FIT files that pass checks)
-                if is_fit and FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
+                if is_fit and config.FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
                     try:
-                        with fits.open(str(path), mode='readonly') as hdul:
+                        with config.fits.open(str(path), mode='readonly') as hdul:
                             header = hdul[0].header
                             camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
                             with open('debug.log', 'a') as f:
@@ -296,10 +240,10 @@ class AstroScannerApp(ctk.CTk):
                             f.write(f"Failed to read fits header for {file_name}: {e}\n")
 
                 # Try to read missing camera from EXIF (for non-FIT files)
-                if not is_fit and EXIF_AVAILABLE and not meta.get('camera'):
+                if not is_fit and config.EXIF_AVAILABLE and not meta.get('camera'):
                     try:
                         with open(str(path), 'rb') as f:
-                            tags = exifread.process_file(f)
+                            tags = config.exifread.process_file(f)
                             camera = tags.get('Image Model') or tags.get('EXIF Model')
                             with open('debug.log', 'a') as f:
                                 f.write(f"Exif header read for {file_name}: camera={camera}\n")
