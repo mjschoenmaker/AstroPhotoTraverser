@@ -29,7 +29,11 @@ class AstroScannerCore:
         file_list = fit_files + cr2_files + dng_files + jpg_files + jpeg_files + png_files
 
         data_rows = []
+        total_files = len(file_list)
         for idx, path in enumerate(file_list, start=1):
+            # Send the update to the UI
+            self.progress(idx, total_files)
+            
             file_name = path.name
             is_fit = file_name.lower().endswith(('.fit', '.fits'))
 
@@ -262,6 +266,11 @@ class AstroScannerApp(ctk.CTk):
         self.path_display = ctk.CTkLabel(self, text="No folder selected", text_color="gray")
         self.path_display.pack(pady=5)
 
+        # --- Hidden UI Elements (Progress) ---
+        self.progress_label = ctk.CTkLabel(self, text="Processing...")
+        self.progress_bar = ctk.CTkProgressBar(self, width=400)
+        self.progress_bar.set(0)
+        
         self.scan_button = ctk.CTkButton(self, text="Start Scan & Create CSV", 
                                           command=self.start_scan_thread, state="disabled",
                                           fg_color="#2ecc71", hover_color="#27ae60")
@@ -285,6 +294,15 @@ class AstroScannerApp(ctk.CTk):
         except Exception:
             _append()
 
+    def update_progress(self, current, total):
+        """Updates the progress bar from 0.0 to 1.0"""
+        if total > 0:
+            fraction = current / total
+            percentage = int(fraction * 100)
+            # .after(0, ...) ensures the UI update happens on the main thread
+            self.after(0, lambda: self.progress_bar.set(fraction))
+            self.after(0, lambda: self.progress_label.configure(text=f"Progress: {percentage}% ({current}/{total})"))
+
     def select_dir(self):
         self.selected_path = filedialog.askdirectory()
         if self.selected_path:
@@ -293,6 +311,11 @@ class AstroScannerApp(ctk.CTk):
             self.log(f"Target set to: {self.selected_path}")
 
     def start_scan_thread(self):
+        # 1. Show the progress elements before starting
+        self.progress_label.pack(pady=(10, 0), after=self.scan_button)
+        self.progress_bar.pack(pady=(5, 10), after=self.progress_label)
+        self.progress_bar.set(0)
+        
         if not hasattr(self, 'selected_path') or not self.selected_path:
             self.after(0, lambda: messagebox.showwarning("Warning", "Please select a folder first!"))
             return
@@ -316,7 +339,7 @@ class AstroScannerApp(ctk.CTk):
         # This allows the logic to 'talk' to the UI without being 'part' of it
         core = AstroScannerCore(
             log_callback=self.log,
-            progress_callback=lambda current, total: self.log(f"Processing {current}/{total}")
+            progress_callback=self.update_progress
         )
 
         try:
