@@ -48,6 +48,7 @@ FILE_REGEX = re.compile(
     r'_gain(?P<gain>\d+)'               # gain120
     r'_(?P<timestamp>\d{8}-\d{6})'      # 20250405-214232
     r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C'  # -10C or -10.5C
+    r'_(?P<rotation>\d+)deg'            # 90deg
 )
 
 # Matches folder names starting with YYYYMMDD or YYYY-MM-DD (also allows underscores)
