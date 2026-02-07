@@ -31,204 +31,13 @@ class AstroScannerCore:
         data_rows = []
         total_files = len(file_list)
         for idx, path in enumerate(file_list, start=1):
+            row = self._extract_metadata(path, root)
+            if row:
+                data_rows.append(row)
+            
             # Send the update to the UI every 50 files
             if idx % 50 == 0 or idx == total_files:
-                self.progress(idx, total_files)
-            
-            file_name = path.name
-            is_fit = file_name.lower().endswith(('.fit', '.fits'))
-
-            # Extract path components relative to selected root
-            try:
-                rel_parts = path.relative_to(Path(root)).parts
-                num_parts = len(rel_parts)
-                if num_parts >= 3:
-                    obj_name = rel_parts[0]
-                    if num_parts == 3:
-                        telescope = ''
-                        session_info = rel_parts[1]
-                    else:  # num_parts >= 4
-                        telescope = rel_parts[1]
-                        session_info = rel_parts[2]
-                else:
-                    obj_name = ''
-                    telescope = ''
-                    session_info = path.parent.name if path.parent else ''
-            except ValueError:
-                # If relative_to fails, fall back to old method
-                session_info = path.parent.name if path.parent is not None else ''
-                telescope = path.parent.parent.name if path.parent and path.parent.parent else ''
-                obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
-
-            # Try the strict regex first, fall back to tolerant searches
-            match = config.FILE_REGEX.search(file_name)
-            if match:
-                meta = match.groupdict()
-                # Invalidate camera if it matches invalid patterns (e.g., starts with 'gain')
-                if meta.get('camera') and re.match(r'gain\d+', meta['camera'], re.IGNORECASE):
-                    meta['camera'] = None
-            else:
-                meta = {}
-                # tolerant individual field searches
-                exp_m = re.search(r'(?P<exp>[\d.]+)s', file_name)
-                bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
-                gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
-                ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
-                temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
-                rot_m = re.search(r'_(?P<rotation>\d+)deg', file_name)
-
-                if exp_m:
-                    meta['exp'] = exp_m.group('exp')
-                if bin_m:
-                    meta['bin'] = bin_m.group('bin')
-                if gain_m:
-                    meta['gain'] = gain_m.group('gain')
-                if ts_m:
-                    meta['timestamp'] = ts_m.group(0)
-                if temp_m:
-                    meta['temp'] = temp_m.group('temp')
-                if rot_m:
-                    meta['rotation'] = rot_m.group('rotation')
-
-                # Attempt to identify camera token: look for token after Bin
-                if 'camera' not in meta:
-                    tokens = [t for t in re.split(r'[_\-]', file_name) if t]
-                    bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
-                    if bin_indices:
-                        bin_idx = bin_indices[0]
-                        if bin_idx + 1 < len(tokens):
-                            candidate = tokens[bin_idx + 1]
-                            if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
-                                meta['camera'] = candidate
-
-                # Invalidate camera if it starts with ISO followed by digits
-                if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
-                    meta['camera'] = None
-                
-                # Invalidate camera if it actually is a filter name
-                if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
-                    meta['filter'] = meta['camera']  # move value to filter
-                    meta['camera'] = None
-
-            # Use cached camera from session if available
-            if not meta.get('camera') and session_info in self.session_to_camera:
-                meta['camera'] = self.session_to_camera[session_info]
-            elif meta.get('camera'):
-                self.session_to_camera[session_info] = meta['camera']
-
-            # Use cached gain from session if available
-            if not meta.get('gain') and session_info in self.session_to_gain:
-                meta['gain'] = self.session_to_gain[session_info]
-
-            # Use cached exposure time from session if available
-            if not meta.get('exp') and session_info in self.session_to_exp:
-                meta['exp'] = self.session_to_exp[session_info]
-            # Use cached temperature from session if available
-            if not meta.get('temp') and session_info in self.session_to_temp:
-                meta['temp'] = self.session_to_temp[session_info]
-
-            # If still missing major metadata, log a skipped-file note but still include minimal info
-            if not meta:
-                self.log(f"Note: filename did not match expected patterns: {file_name}")
-
-            # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
-            parent_name = (session_info or '').strip()
-            if not config.DATE_FOLDER_RE.match(parent_name):
-                # occasionally log skipped non-date folders
-                if idx % 100 == 0:
-                    self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
-                continue
-
-            # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_" 
-            lower_path_str = str(path).lower()
-            if not (file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
-                continue
-            # or that reside in a folder that include "darks","bias" or "flats"
-            if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
-                continue
-
-            # Identify filter from session folder name if not in filename
-            filter_from_filename = meta.get('filter')
-            if filter_from_filename:
-                filter_name = config.FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
-            else:
-                filter_name = config.identify_filter(session_info or '')
-                
-            # Try to read missing camera from FITS header (only for FIT files that pass checks)
-            if is_fit and config.FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
-                try:
-                    with config.fits.open(str(path), mode='readonly') as hdul:
-                        header = hdul[0].header
-                        camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
-                        with open('debug.log', 'a') as f:
-                            f.write(f"Fits header read for {file_name}: camera={camera}\n")
-                        if camera:
-                            meta['camera'] = camera
-                            self.session_to_camera[session_info] = meta['camera']  # update cache
-                except Exception as e:
-                    with open('debug.log', 'a') as f:
-                        f.write(f"Failed to read fits header for {file_name}: {e}\n")
-
-            # Try to read missing camera from EXIF (for non-FIT files)
-            if not is_fit and config.EXIF_AVAILABLE and not meta.get('camera'):
-                try:
-                    with open(str(path), 'rb') as f:
-                        tags = config.exifread.process_file(f)
-                        camera = tags.get('Image Model') or tags.get('EXIF Model')
-                        with open('debug.log', 'a') as f:
-                            f.write(f"Exif header read for {file_name}: camera={camera}\n")
-                        if camera:
-                            meta['camera'] = str(camera)
-                            self.session_to_camera[session_info] = meta['camera']  # update cache
-                        # Also try to get ISO for gain if missing and not cached for session
-                        if not meta.get('gain') and session_info not in self.session_to_gain:
-                            iso = tags.get('EXIF ISOSpeedRatings')
-                            if iso:
-                                meta['gain'] = str(iso)
-                                self.session_to_gain[session_info] = meta['gain']  # cache gain
-                        # Also try to get exposure time if missing and not cached for session
-                        if not meta.get('exp') and session_info not in self.session_to_exp:
-                            exp_time = tags.get('EXIF ExposureTime')
-                            if exp_time:
-                                # Convert exposure time to seconds (e.g., "1/30" -> "0.0333")
-                                exp_str = str(exp_time)
-                                if '/' in exp_str:
-                                    num, den = exp_str.split('/')
-                                    try:
-                                        exp_seconds = float(num) / float(den)
-                                        meta['exp'] = f"{exp_seconds:.4f}".rstrip('0').rstrip('.')
-                                        self.session_to_exp[session_info] = meta['exp']  # cache exposure
-                                    except ValueError:
-                                        pass
-                                else:
-                                    # Already in seconds format
-                                    meta['exp'] = exp_str
-                                    self.session_to_exp[session_info] = meta['exp']  # cache exposure
-                        # Also try to get temperature if missing and not cached for session
-                        if not meta.get('temp') and session_info not in self.session_to_temp:
-                            temp_tag = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
-                            if temp_tag:
-                                meta['temp'] = str(temp_tag)
-                                self.session_to_temp[session_info] = meta['temp']  # cache temperature
-                except Exception as e:
-                    with open('debug.log', 'a') as f:
-                        f.write(f"Failed to read exif header for {file_name}: {e}\n")
-
-            row = {
-                'Object': obj_name or 'Unknown',
-                'Filter': filter_name,
-                'Camera': meta.get('camera', 'N/A'),
-                'Telescope': telescope or 'Unknown',
-                'Exposure': meta.get('exp', '0'),
-                'Bin': meta.get('bin', '1'),
-                'Gain': meta.get('gain', '0'),
-                'Temp': meta.get('temp', '0'),
-                'Rotation': meta.get('rotation', ''),
-                'Timestamp': meta.get('timestamp', ''),
-                'Session Folder': session_info or '',
-                'Path': str(path)
-            }
-            data_rows.append(row)
+                self.progress(idx, total_files)      
         
         return data_rows
     
@@ -241,6 +50,201 @@ class AstroScannerCore:
             dict_writer = csv.DictWriter(f, fieldnames=keys)
             dict_writer.writeheader()
             dict_writer.writerows(data_rows)
+
+    # This method is the heart of the metadata extraction logic. It takes a file path and the root directory, and returns a dictionary of extracted metadata.
+    def _extract_metadata(self, path, root):
+        file_name = path.name
+        is_fit = file_name.lower().endswith(('.fit', '.fits'))
+
+        # Extract path components relative to selected root
+        try:
+            rel_parts = path.relative_to(Path(root)).parts
+            num_parts = len(rel_parts)
+            if num_parts >= 3:
+                obj_name = rel_parts[0]
+                if num_parts == 3:
+                    telescope = ''
+                    session_info = rel_parts[1]
+                else:  # num_parts >= 4
+                    telescope = rel_parts[1]
+                    session_info = rel_parts[2]
+            else:
+                obj_name = ''
+                telescope = ''
+                session_info = path.parent.name if path.parent else ''
+        except ValueError:
+            # If relative_to fails, fall back to old method
+            session_info = path.parent.name if path.parent is not None else ''
+            telescope = path.parent.parent.name if path.parent and path.parent.parent else ''
+            obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
+
+        # Try the strict regex first, fall back to tolerant searches
+        match = config.FILE_REGEX.search(file_name)
+        if match:
+            meta = match.groupdict()
+            # Invalidate camera if it matches invalid patterns (e.g., starts with 'gain')
+            if meta.get('camera') and re.match(r'gain\d+', meta['camera'], re.IGNORECASE):
+                meta['camera'] = None
+        else:
+            meta = {}
+            # tolerant individual field searches
+            exp_m = re.search(r'(?P<exp>[\d.]+)s', file_name)
+            bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
+            gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
+            ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
+            temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
+            rot_m = re.search(r'_(?P<rotation>\d+)deg', file_name)
+
+            if exp_m:
+                meta['exp'] = exp_m.group('exp')
+            if bin_m:
+                meta['bin'] = bin_m.group('bin')
+            if gain_m:
+                meta['gain'] = gain_m.group('gain')
+            if ts_m:
+                meta['timestamp'] = ts_m.group(0)
+            if temp_m:
+                meta['temp'] = temp_m.group('temp')
+            if rot_m:
+                meta['rotation'] = rot_m.group('rotation')
+
+            # Attempt to identify camera token: look for token after Bin
+            if 'camera' not in meta:
+                tokens = [t for t in re.split(r'[_\-]', file_name) if t]
+                bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
+                if bin_indices:
+                    bin_idx = bin_indices[0]
+                    if bin_idx + 1 < len(tokens):
+                        candidate = tokens[bin_idx + 1]
+                        if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
+                            meta['camera'] = candidate
+
+            # Invalidate camera if it starts with ISO followed by digits
+            if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
+                meta['camera'] = None
+            
+            # Invalidate camera if it actually is a filter name
+            if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
+                meta['filter'] = meta['camera']  # move value to filter
+                meta['camera'] = None
+
+        # Use cached camera from session if available
+        if not meta.get('camera') and session_info in self.session_to_camera:
+            meta['camera'] = self.session_to_camera[session_info]
+        elif meta.get('camera'):
+            self.session_to_camera[session_info] = meta['camera']
+
+        # Use cached gain from session if available
+        if not meta.get('gain') and session_info in self.session_to_gain:
+            meta['gain'] = self.session_to_gain[session_info]
+
+        # Use cached exposure time from session if available
+        if not meta.get('exp') and session_info in self.session_to_exp:
+            meta['exp'] = self.session_to_exp[session_info]
+        # Use cached temperature from session if available
+        if not meta.get('temp') and session_info in self.session_to_temp:
+            meta['temp'] = self.session_to_temp[session_info]
+
+        # If still missing major metadata, log a skipped-file note but still include minimal info
+        if not meta:
+            self.log(f"Note: filename did not match expected patterns: {file_name}")
+
+        # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
+        parent_name = (session_info or '').strip()
+        if not config.DATE_FOLDER_RE.match(parent_name):
+            self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
+            return
+
+        # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_" 
+        lower_path_str = str(path).lower()
+        if not (file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
+            return
+        # or that reside in a folder that include "darks","bias" or "flats"
+        if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
+            return
+
+        # Identify filter from session folder name if not in filename
+        filter_from_filename = meta.get('filter')
+        if filter_from_filename:
+            filter_name = config.FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
+        else:
+            filter_name = config.identify_filter(session_info or '')
+            
+        # Try to read missing camera from FITS header (only for FIT files that pass checks)
+        if is_fit and config.FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
+            try:
+                with config.fits.open(str(path), mode='readonly') as hdul:
+                    header = hdul[0].header
+                    camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
+                    with open('debug.log', 'a') as f:
+                        f.write(f"Fits header read for {file_name}: camera={camera}\n")
+                    if camera:
+                        meta['camera'] = camera
+                        self.session_to_camera[session_info] = meta['camera']  # update cache
+            except Exception as e:
+                with open('debug.log', 'a') as f:
+                    f.write(f"Failed to read fits header for {file_name}: {e}\n")
+
+        # Try to read missing camera from EXIF (for non-FIT files)
+        if not is_fit and config.EXIF_AVAILABLE and not meta.get('camera'):
+            try:
+                with open(str(path), 'rb') as f:
+                    tags = config.exifread.process_file(f)
+                    camera = tags.get('Image Model') or tags.get('EXIF Model')
+                    with open('debug.log', 'a') as f:
+                        f.write(f"Exif header read for {file_name}: camera={camera}\n")
+                    if camera:
+                        meta['camera'] = str(camera)
+                        self.session_to_camera[session_info] = meta['camera']  # update cache
+                    # Also try to get ISO for gain if missing and not cached for session
+                    if not meta.get('gain') and session_info not in self.session_to_gain:
+                        iso = tags.get('EXIF ISOSpeedRatings')
+                        if iso:
+                            meta['gain'] = str(iso)
+                            self.session_to_gain[session_info] = meta['gain']  # cache gain
+                    # Also try to get exposure time if missing and not cached for session
+                    if not meta.get('exp') and session_info not in self.session_to_exp:
+                        exp_time = tags.get('EXIF ExposureTime')
+                        if exp_time:
+                            # Convert exposure time to seconds (e.g., "1/30" -> "0.0333")
+                            exp_str = str(exp_time)
+                            if '/' in exp_str:
+                                num, den = exp_str.split('/')
+                                try:
+                                    exp_seconds = float(num) / float(den)
+                                    meta['exp'] = f"{exp_seconds:.4f}".rstrip('0').rstrip('.')
+                                    self.session_to_exp[session_info] = meta['exp']  # cache exposure
+                                except ValueError:
+                                    pass
+                            else:
+                                # Already in seconds format
+                                meta['exp'] = exp_str
+                                self.session_to_exp[session_info] = meta['exp']  # cache exposure
+                    # Also try to get temperature if missing and not cached for session
+                    if not meta.get('temp') and session_info not in self.session_to_temp:
+                        temp_tag = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
+                        if temp_tag:
+                            meta['temp'] = str(temp_tag)
+                            self.session_to_temp[session_info] = meta['temp']  # cache temperature
+            except Exception as e:
+                with open('debug.log', 'a') as f:
+                    f.write(f"Failed to read exif header for {file_name}: {e}\n")
+
+        return {
+            'Object': obj_name or 'Unknown',
+            'Filter': filter_name,
+            'Camera': meta.get('camera', 'N/A'),
+            'Telescope': telescope or 'Unknown',
+            'Exposure': meta.get('exp', '0'),
+            'Bin': meta.get('bin', '1'),
+            'Gain': meta.get('gain', '0'),
+            'Temp': meta.get('temp', '0'),
+            'Rotation': meta.get('rotation', ''),
+            'Timestamp': meta.get('timestamp', ''),
+            'Session Folder': session_info or '',
+            'Path': str(path)
+        }
+
 
 class AstroScannerApp(ctk.CTk):
     def __init__(self):
