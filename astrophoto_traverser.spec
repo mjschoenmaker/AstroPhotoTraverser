@@ -7,7 +7,7 @@ from PyInstaller.utils.hooks import collect_data_files
 ctk_path = os.path.dirname(customtkinter.__file__)
 
 a = Analysis(
-    ['astrophoto-traverser.py'],
+    ['astrophoto_traverser.py'],
     pathex=[],
     binaries=[],
     datas=[
@@ -36,7 +36,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='astrophoto-traverser',
+    name='astrophoto_traverser',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -56,5 +56,5 @@ coll = COLLECT(
     strip=False,
     upx=True,
     upx_exclude=[],
-    name='astrophoto-traverser',
+    name='astrophoto_traverser',
 )
