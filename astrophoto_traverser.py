@@ -63,20 +63,43 @@ class AstroScannerCore:
             if num_parts >= 3:
                 obj_name = rel_parts[0]
                 if num_parts == 3:
-                    telescope = ''
+                    telescope = 'missing info'
                     session_info = rel_parts[1]
                 else:  # num_parts >= 4
-                    telescope = rel_parts[1]
-                    session_info = rel_parts[2]
+                    # in case of missing telescope folder, we are likely to have to treat rel_parts[1] as session and leave telescope empty.
+                    if config.DATE_FOLDER_RE.match(rel_parts[1]):
+                        telescope = 'missing info'
+                        session_info = rel_parts[1]
+                    else:
+                        telescope = rel_parts[1]
+                        session_info = rel_parts[2]
             else:
                 obj_name = ''
-                telescope = ''
+                telescope = 'missing info'
                 session_info = path.parent.name if path.parent else ''
         except ValueError:
             # If relative_to fails, fall back to old method
             session_info = path.parent.name if path.parent is not None else ''
-            telescope = path.parent.parent.name if path.parent and path.parent.parent else ''
+            telescope = path.parent.parent.name if path.parent and path.parent.parent else 'missing info'
             obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
+
+        # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
+        parent_name = (session_info or '').strip()
+        if not config.DATE_FOLDER_RE.match(parent_name):
+            self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
+            return
+
+        # Additionally, only include image files that start with "Preview_", "Light_", "CRW_", or "IMG_" 
+        lower_path_str = str(path).lower()
+        if not (file_name.startswith("Preview_") or file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
+            return
+        # Additionaly skip ASIAIR thumbnail files that end in _thn.jpg
+        if file_name.endswith("_thn.jpg"):
+            return
+        
+        # or that reside in a folder that include "darks","bias" or "flats"
+        if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
+            return
 
         # Try the strict regex first, fall back to tolerant searches
         match = config.FILE_REGEX.search(file_name)
@@ -90,6 +113,7 @@ class AstroScannerCore:
             # tolerant individual field searches
             exp_m = re.search(r'(?P<exp>[\d.]+)s', file_name)
             bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
+            filter_m = re.search(r'(?:_(?P<filter>[^_]+))?', file_name)
             gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
             ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
             temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
@@ -99,6 +123,8 @@ class AstroScannerCore:
                 meta['exp'] = exp_m.group('exp')
             if bin_m:
                 meta['bin'] = bin_m.group('bin')
+            if filter_m:
+                meta['filter'] = filter_m.group('filter')
             if gain_m:
                 meta['gain'] = gain_m.group('gain')
             if ts_m:
@@ -116,17 +142,28 @@ class AstroScannerCore:
                     bin_idx = bin_indices[0]
                     if bin_idx + 1 < len(tokens):
                         candidate = tokens[bin_idx + 1]
-                        if re.match(r'^[A-Za-z0-9]+$', candidate) and not re.search(r'gain\d+|\d{8}|\d+s', candidate, re.IGNORECASE):
+                        if re.match(r'^[A-Za-z0-9]+$', candidate):
                             meta['camera'] = candidate
 
             # Invalidate camera if it starts with ISO followed by digits
             if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
                 meta['camera'] = None
             
+            # Invalidate camera if it starts with gain followed by digits
+            if meta.get('camera') and re.match(r'gain\d+|\d{8}|\d+s', meta['camera'], re.IGNORECASE):
+                meta['camera'] = None
+
             # Invalidate camera if it actually is a filter name
             if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
                 meta['filter'] = meta['camera']  # move value to filter
                 meta['camera'] = None
+
+            # Try to get filter from filename, when one of filter_keywords delimited by _ is found.
+            if not meta.get('filter'):
+                for key, formal_name in config.FILTER_KEYWORDS.items():
+                    if re.search(r'[_\-]' + re.escape(key) + r'[_\-]', file_name, re.IGNORECASE):
+                        meta['filter'] = formal_name
+                        break
 
         # Use cached camera from session if available
         if not meta.get('camera') and session_info in self.session_to_camera:
@@ -145,23 +182,11 @@ class AstroScannerCore:
         if not meta.get('temp') and session_info in self.session_to_temp:
             meta['temp'] = self.session_to_temp[session_info]
 
+
+
         # If still missing major metadata, log a skipped-file note but still include minimal info
         if not meta:
             self.log(f"Note: filename did not match expected patterns: {file_name}")
-
-        # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
-        parent_name = (session_info or '').strip()
-        if not config.DATE_FOLDER_RE.match(parent_name):
-            self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
-            return
-
-        # Additionally, only include image files that start with "Light_", "CRW_", or "IMG_" 
-        lower_path_str = str(path).lower()
-        if not (file_name.startswith("Light_") or file_name.startswith("CRW_") or file_name.startswith("IMG_")):
-            return
-        # or that reside in a folder that include "darks","bias" or "flats"
-        if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
-            return
 
         # Identify filter from session folder name if not in filename
         filter_from_filename = meta.get('filter')

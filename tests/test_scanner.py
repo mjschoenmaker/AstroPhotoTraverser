@@ -43,7 +43,7 @@ def test_folder_structure_regex(scanner, tmp_path):
     
     assert match is not None # there is a date folder
 
-def test_extract_metadata_logic(scanner, tmp_path):
+def test_url_filter_in_session(scanner, tmp_path):
     # Create a real folder structure
     # Root: tmp_path
     # Path: tmp_path/M42/Telescope/2024-01-01/file.fits
@@ -55,7 +55,74 @@ def test_extract_metadata_logic(scanner, tmp_path):
     result = scanner._extract_metadata(path, tmp_path)
 
     # Assert the logic inside the method works
+    assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
+    assert result['Exposure'] == "67.0"
+    assert result['Bin'] == "1"
+    assert result['Camera'] == "PlayerOne"
+    assert result['Filter'] == "UV/IR Cut"
+    assert result['Gain'] == "456" 
+    assert result['Temp'] == "-273"
+    assert result['Rotation'] == "123"
+
+def test_url_filter_in_filename(scanner, tmp_path):
+    # Create a real folder structure
+    # Root: tmp_path
+    # Path: tmp_path/M42/Telescope/2024-01-01/file.fits
+    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
+    path.parent.mkdir(parents=True)
+    path.write_text("fake fits data") # create a dummy file
+
+    # Call the extract_metadata method
+    result = scanner._extract_metadata(path, tmp_path)
+
+    # Assert the logic inside the method works
+    assert result['Telescope'] == "2000mm Telescope"
+    assert result['Object'] == "M42"
+    assert result['Exposure'] == "67.0"
+    assert result['Bin'] == "1"
+    assert result['Camera'] == "PlayerOne"
+    assert result['Filter'] == "UV/IR Cut"
+    assert result['Gain'] == "456" 
+    assert result['Temp'] == "-273"
+    assert result['Rotation'] == "123"
+
+def test_url_ignore_filter_in_session(scanner, tmp_path):
+    # Create a real folder structure
+    # Root: tmp_path
+    # Path: tmp_path/M42/Telescope/2024-01-01/file.fits
+    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard L-Extreme" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
+    path.parent.mkdir(parents=True)
+    path.write_text("fake fits data") # create a dummy file
+
+    # Call the extract_metadata method
+    result = scanner._extract_metadata(path, tmp_path)
+
+    # Assert the logic inside the method works
+    assert result['Telescope'] == "2000mm Telescope"
+    assert result['Object'] == "M42"
+    assert result['Exposure'] == "67.0"
+    assert result['Bin'] == "1"
+    assert result['Camera'] == "PlayerOne"
+    assert result['Filter'] == "UV/IR Cut"
+    assert result['Gain'] == "456" 
+    assert result['Temp'] == "-273"
+    assert result['Rotation'] == "123"
+
+def test_url_missing_telescope(scanner, tmp_path):
+    # Create a real folder structure
+    # Root: tmp_path
+    # Path: tmp_path/M105 - triplet in Leo/2024-01-01/file.fits
+    path = tmp_path / "M105 - triplet in Leo" / "2024-02-07 Backyard UVIR" / "Light_M105_123deg_67.0s_-273C_Bin1_PlayerOne_gain456_001.fits"
+    path.parent.mkdir(parents=True)
+    path.write_text("fake fits data") # create a dummy file
+
+    # Call the extract_metadata method
+    result = scanner._extract_metadata(path, tmp_path)
+
+    # Assert the logic inside the method works
+    assert result['Telescope'] == "missing info"
+    assert result['Object'] == "M105 - triplet in Leo"
     assert result['Exposure'] == "67.0"
     assert result['Bin'] == "1"
     assert result['Camera'] == "PlayerOne"
