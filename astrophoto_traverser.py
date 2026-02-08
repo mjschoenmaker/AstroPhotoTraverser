@@ -233,12 +233,12 @@ class AstroScannerCore:
         return {
             'Object': obj_name or 'Unknown',
             'Filter': filter_name,
-            'Camera': meta.get('camera', 'N/A'),
-            'Telescope': telescope or 'Unknown',
+            'Camera': meta.get('camera', ''),
+            'Telescope': telescope or '',
             'Exposure': meta.get('exp', '0'),
             'Bin': meta.get('bin', '1'),
-            'Gain': meta.get('gain', '0'),
-            'Temp': meta.get('temp', '0'),
+            'Gain': meta.get('gain', ''),
+            'Temp': meta.get('temp', ''),
             'Rotation': meta.get('rotation', ''),
             'Timestamp': meta.get('timestamp', ''),
             'Session Folder': session_info or '',
@@ -272,7 +272,7 @@ class AstroScannerApp(ctk.CTk):
         self.path_display.pack(pady=5)
 
         # --- Hidden UI Elements (Progress) ---
-        self.progress_label = ctk.CTkLabel(self, text="Processing...")
+        self.progress_label = ctk.CTkLabel(self, text="Initializing...")
         self.progress_bar = ctk.CTkProgressBar(self, width=400)
         self.progress_bar.set(0)
         
@@ -314,9 +314,17 @@ class AstroScannerApp(ctk.CTk):
             self.path_display.configure(text=self.selected_path, text_color="white")
             self.scan_button.configure(state="normal")
             self.log(f"Target set to: {self.selected_path}")
+            
+            # hide the progress elements until scan starts
+            self.progress_label.pack_forget()
+            self.progress_bar.pack_forget()
+            
+            # empty the status box
+            self.status_box.delete("1.0", "end")
 
     def start_scan_thread(self):
         # 1. Show the progress elements before starting
+        self.progress_label.configure(text="Initializing...")
         self.progress_label.pack(pady=(10, 0), after=self.scan_button)
         self.progress_bar.pack(pady=(5, 10), after=self.progress_label)
         self.progress_bar.set(0)
