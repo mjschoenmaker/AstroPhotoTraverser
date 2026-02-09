@@ -164,6 +164,10 @@ class AstroScannerCore:
                     if re.search(r'[_\-]' + re.escape(key) + r'[_\-]', file_name, re.IGNORECASE):
                         meta['filter'] = formal_name
                         break
+            
+            # Try to identify filter from session folder name if not in filename
+            if not meta.get('filter'):
+                meta['filter'] = config.identify_filter(session_info or '')
 
         # Use cached camera from session if available
         if not meta.get('camera') and session_info in self.session_to_camera:
@@ -181,20 +185,7 @@ class AstroScannerCore:
         # Use cached temperature from session if available
         if not meta.get('temp') and session_info in self.session_to_temp:
             meta['temp'] = self.session_to_temp[session_info]
-
-
-
-        # If still missing major metadata, log a skipped-file note but still include minimal info
-        if not meta:
-            self.log(f"Note: filename did not match expected patterns: {file_name}")
-
-        # Identify filter from session folder name if not in filename
-        filter_from_filename = meta.get('filter')
-        if filter_from_filename:
-            filter_name = config.FILTER_KEYWORDS.get(filter_from_filename.lower(), filter_from_filename)
-        else:
-            filter_name = config.identify_filter(session_info or '')
-            
+         
         # Try to read missing camera from FITS header (only for FIT files that pass checks)
         if is_fit and config.FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
             try:
@@ -255,9 +246,13 @@ class AstroScannerCore:
                 with open('debug.log', 'a') as f:
                     f.write(f"Failed to read exif header for {file_name}: {e}\n")
 
+        # If still missing major metadata, log a skipped-file note but still include minimal info
+        if not meta:
+            self.log(f"Note: filename did not match expected patterns: {file_name}")
+
         return {
             'Object': obj_name or 'Unknown',
-            'Filter': filter_name,
+            'Filter': meta.get('filter', 'Broadband/Unknown'),
             'Camera': meta.get('camera', ''),
             'Telescope': telescope or '',
             'Exposure': meta.get('exp', '0'),
