@@ -13,6 +13,7 @@ class AstroScannerCore:
         self.log = log_callback or (lambda x: None)
         self.progress = progress_callback or (lambda x, y: None)
         self.session_to_camera = {}
+        self.session_to_filter = {}
         self.session_to_gain = {}
         self.session_to_exp = {}
         self.session_to_temp = {} 
@@ -113,7 +114,6 @@ class AstroScannerCore:
             # tolerant individual field searches
             exp_m = re.search(r'(?P<exp>[\d.]+)s', file_name)
             bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
-            filter_m = re.search(r'(?:_(?P<filter>[^_]+))?', file_name)
             gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
             ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
             temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
@@ -123,8 +123,6 @@ class AstroScannerCore:
                 meta['exp'] = exp_m.group('exp')
             if bin_m:
                 meta['bin'] = bin_m.group('bin')
-            if filter_m:
-                meta['filter'] = filter_m.group('filter')
             if gain_m:
                 meta['gain'] = gain_m.group('gain')
             if ts_m:
@@ -155,7 +153,7 @@ class AstroScannerCore:
 
             # Invalidate camera if it actually is a filter name
             if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
-                meta['filter'] = meta['camera']  # move value to filter
+                meta['filter'] = config.identify_filter(meta['camera'])  # move value to filter
                 meta['camera'] = None
 
             # Try to get filter from filename, when one of filter_keywords delimited by _ is found.
@@ -164,10 +162,6 @@ class AstroScannerCore:
                     if re.search(r'[_\-]' + re.escape(key) + r'[_\-]', file_name, re.IGNORECASE):
                         meta['filter'] = formal_name
                         break
-            
-            # Try to identify filter from session folder name if not in filename
-            if not meta.get('filter'):
-                meta['filter'] = config.identify_filter(session_info or '')
 
         # Use cached camera from session if available
         if not meta.get('camera') and session_info in self.session_to_camera:
@@ -178,25 +172,44 @@ class AstroScannerCore:
         # Use cached gain from session if available
         if not meta.get('gain') and session_info in self.session_to_gain:
             meta['gain'] = self.session_to_gain[session_info]
-
         # Use cached exposure time from session if available
         if not meta.get('exp') and session_info in self.session_to_exp:
             meta['exp'] = self.session_to_exp[session_info]
         # Use cached temperature from session if available
         if not meta.get('temp') and session_info in self.session_to_temp:
             meta['temp'] = self.session_to_temp[session_info]
-         
-        # Try to read missing camera from FITS header (only for FIT files that pass checks)
-        if is_fit and config.FITS_AVAILABLE and (not meta.get('camera') or meta.get('camera') == 'N/A'):
+        # Use cached filter from session if available
+        if not meta.get('filter') and session_info in self.session_to_filter:
+            meta['filter'] = self.session_to_filter[session_info]
+
+        # Try to read missing info from FITS header (only for FIT files that pass checks)
+        if is_fit and config.FITS_AVAILABLE and (
+            not meta.get('camera')  
+            or not meta.get('gain')
+            or not meta.get('temp')
+            or not meta.get('filter')
+            ):
             try:
                 with config.fits.open(str(path), mode='readonly') as hdul:
                     header = hdul[0].header
                     camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
+                    gain = header.get('GAIN')
+                    temp = header.get('CCD-TEMP') or header.get('SET-TEMP')
+                    filter_name = header.get('FILTER')
                     with open('debug.log', 'a') as f:
-                        f.write(f"Fits header read for {file_name}: camera={camera}\n")
+                        f.write(f"Fits header read for {file_name}: camera={camera}, gain={gain}, temp={temp}, filter={filter_name}\n")
                     if camera:
                         meta['camera'] = camera
                         self.session_to_camera[session_info] = meta['camera']  # update cache
+                    if filter_name:
+                        meta['filter'] = config.identify_filter(filter_name) 
+                        # not cacheing filter because it can change within a session, but we can still identify it for this file
+                    if gain:
+                        meta['gain'] = gain
+                        self.session_to_gain[session_info] = meta['gain']  # update cache
+                    if temp:
+                        meta['temp'] = temp
+                        self.session_to_temp[session_info] = meta['temp']  # update cache
             except Exception as e:
                 with open('debug.log', 'a') as f:
                     f.write(f"Failed to read fits header for {file_name}: {e}\n")
@@ -246,6 +259,13 @@ class AstroScannerCore:
                 with open('debug.log', 'a') as f:
                     f.write(f"Failed to read exif header for {file_name}: {e}\n")
 
+        # As a last resort, try to identify filter from session folder name if not found in filename or FITS header
+        if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
+            meta['filter'] = config.identify_filter(session_info)
+            # cache filter if succesfully identified from session folder, since it's likely consistent for the session
+            if meta['filter'] not in [None, 'Broadband/Unknown']:
+                self.session_to_filter[session_info] = meta['filter']
+       
         # If still missing major metadata, log a skipped-file note but still include minimal info
         if not meta:
             self.log(f"Note: filename did not match expected patterns: {file_name}")

@@ -20,11 +20,22 @@ if False:
     
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
-    'lextreme': 'L-Extreme',
+    'lxtrme': 'L-eXtreme',
+    'lxtreme': 'L-eXtreme',
+    'lextreme': 'L-eXtreme',
+    'l-extreme': 'L-eXtreme',
+    'lenhance': 'L-eNhance',
+    'l-enhance': 'L-eNhance',
+    'lultimate': 'L-Ultimate',
+    'l-ultimate': 'L-Ultimate',
     'l-pro': 'L-Pro',
     'lpro': 'L-Pro',
     'uvir': 'UV/IR Cut',
     'uv/ir': 'UV/IR Cut',
+    'irblock': 'UV/IR Cut',
+    'irblocked': 'UV/IR Cut',
+    'ir-block': 'UV/IR Cut',
+    'ir filter': 'UV/IR Cut',
     'halpha': 'Ha',
     'ha': 'Ha',
     'h': 'Ha',
@@ -59,9 +70,8 @@ FILE_REGEX = re.compile(
 DATE_FOLDER_RE = re.compile(r'^\d{4}[-_]?\d{2}[-_]?\d{2}')
 
 def identify_filter(folder_name):
-    folder_lower = folder_name.lower()
     for key, formal_name in FILTER_KEYWORDS.items():
-        if re.search(r'\b' + re.escape(key) + r'\b', folder_lower):
+        if re.search(r'\b' + re.escape(key) + r'\b', folder_name, re.IGNORECASE):
             return formal_name
     return "Broadband/Unknown"
 
