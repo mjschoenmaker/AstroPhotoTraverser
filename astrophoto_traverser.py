@@ -35,19 +35,23 @@ class AstroScannerCore:
             if not p.exists():
                 return False
                 
-            # Search for indicators
-            for file in p.iterdir():
+            # Define our patterns
+            extensions = {'.tif', '.tiff', '.psd'}
+            
+            # Use rglob('*') to look into all subdirectories recursively
+            # We use a generator to exit as soon as we find a single matching file
+            for file in p.rglob('*'):
+                if not file.is_file():
+                    continue
+                    
                 name_lower = file.name.lower()
-                if file.suffix.lower() in ['.tif', '.tiff', '.psd']:
-                    self.folder_edit_cache[path_str] = True
-                    self.log(f"Detected edits in folder '{folder_path}' due to file: {file.name}")
-                    return True
-                if "stack" in name_lower:
-                    self.log(f"Detected edits in folder '{folder_path}' due to file: {file.name}")
+                if file.suffix.lower() in extensions or "stack" in name_lower:
+                    self.log(f"Detected edits in '{folder_path}' (found: {file.relative_to(p)})")
                     self.folder_edit_cache[path_str] = True
                     return True
-        except Exception:
-            pass
+                    
+        except Exception as e:
+            self.log(f"Error scanning for edits in {folder_path}: {e}")
             
         self.folder_edit_cache[path_str] = False
         return False

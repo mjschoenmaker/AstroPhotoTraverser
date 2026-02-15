@@ -149,6 +149,32 @@ def test_folder_with_tif_edits_in_session(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "Yes"
 
+def test_folder_with_tif_edits_in_session_subfolders(scanner, tmp_path):
+    # Create a real folder structure
+    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
+    path.parent.mkdir(parents=True)
+    path.write_text("fake fits data") # create a dummy file
+
+    # another file that simulates edits in the same session
+    path2 = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "subfolder" / "sub-subfolder" / "This is a nice edit.tif"
+    path2.parent.mkdir(parents=True, exist_ok=True)
+    path2.write_text("fake tif data") # create a dummy file
+
+    # Call the extract_metadata method
+    result = scanner._extract_metadata(path, tmp_path)
+
+    # Assert the logic inside the method works
+    assert result['Telescope'] == "2000mm Telescope"
+    assert result['Object'] == "M42"
+    assert result['Exposure'] == "67.0"
+    assert result['Bin'] == "1"
+    assert result['Camera'] == "PlayerOne"
+    assert result['Filter'] == "UV/IR Cut"
+    assert result['Gain'] == "456" 
+    assert result['Temp'] == "-273"
+    assert result['Rotation'] == "123"
+    assert result['Edits Detected'] == "Yes"
+
 def test_folder_with_tif_edits_for_telescope(scanner, tmp_path):
     # Create a real folder structure
     path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
