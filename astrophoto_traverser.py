@@ -17,6 +17,38 @@ class AstroScannerCore:
         self.session_to_gain = {}
         self.session_to_exp = {}
         self.session_to_temp = {} 
+        # Cache edit status to avoid redundant folder scans
+        self.folder_edit_cache = {}
+
+    # does the folder contain any files that indicate the images may have been edited (e.g., TIF, PSD, or files with "stack" in the name)? If so, we will skip metadata extraction for all files in that folder since edits often break naming conventions and metadata patterns.
+    def _has_edits(self, folder_path):
+        """Helper to check if a folder contains TIF, PSD, or 'stack' files."""
+        if not folder_path or folder_path == '.':
+            return False
+            
+        path_str = str(folder_path)
+        if path_str in self.folder_edit_cache:
+            return self.folder_edit_cache[path_str]
+
+        try:
+            p = Path(folder_path)
+            if not p.exists():
+                return False
+                
+            # Search for indicators
+            for file in p.iterdir():
+                name_lower = file.name.lower()
+                if file.suffix.lower() in ['.tif', '.tiff', '.psd']:
+                    self.folder_edit_cache[path_str] = True
+                    return True
+                if "stack" in name_lower:
+                    self.folder_edit_cache[path_str] = True
+                    return True
+        except Exception:
+            pass
+            
+        self.folder_edit_cache[path_str] = False
+        return False
 
     def scan_folder(self, root_path):
         # The core engine that traverses files and extracts metadata.
@@ -26,8 +58,7 @@ class AstroScannerCore:
         dng_files = list(root.rglob('*.dng'))
         jpg_files = list(root.rglob('*.jpg'))
         jpeg_files = list(root.rglob('*.jpeg'))
-        png_files = list(root.rglob('*.png'))
-        file_list = fit_files + cr2_files + dng_files + jpg_files + jpeg_files + png_files
+        file_list = fit_files + cr2_files + dng_files + jpg_files + jpeg_files
 
         data_rows = []
         total_files = len(file_list)
@@ -83,6 +114,14 @@ class AstroScannerCore:
             session_info = path.parent.name if path.parent is not None else ''
             telescope = path.parent.parent.name if path.parent and path.parent.parent else 'missing info'
             obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
+
+        # Check both the session folder (parent) and the object folder (grandparent) for signs of edits.
+        session_path = path.parent
+        object_path = session_path.parent if session_path else None
+        
+        has_edits = "No"
+        if self._has_edits(session_path) or self._has_edits(object_path):
+            has_edits = "Yes"
 
         # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
         parent_name = (session_info or '').strip()
@@ -282,6 +321,7 @@ class AstroScannerCore:
             'Rotation': meta.get('rotation', ''),
             'Timestamp': meta.get('timestamp', ''),
             'Session Folder': session_info or '',
+            'Edits Detected': has_edits,
             'Path': str(path)
         }
 
