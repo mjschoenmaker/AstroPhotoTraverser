@@ -45,15 +45,15 @@ class AstroScannerCore:
                     continue
                     
                 name_lower = file.name.lower()
-                # if file is a calibration frame, we should ignore edits in that folder since it's common to have stacks and edits in calibration folders but it doesn't necessarily mean the light frames are edited.
-                if "darks" in name_lower or "bias" in name_lower or "flat" in name_lower:
-                    self.log(f"Ignoring calibration edits in '{folder_path}' (found: {file.relative_to(p)})")
-                    continue
-
                 if file.suffix.lower() in extensions or "stack" in name_lower:
-                    self.log(f"Detected edits in '{folder_path}' (found: {file.relative_to(p)})")
-                    self.folder_edit_cache[path_str] = True
-                    return True
+                    # if file is a calibration frame, we should ignore edits in that folder since it's common to have stacks and edits in calibration folders but it doesn't necessarily mean the light frames are edited.
+                    if "darks" in name_lower or "bias" in name_lower or "flat" in name_lower:
+                        self.log(f"Ignoring calibration edits in '{folder_path}' (found: {file.relative_to(p)})")
+                        return False
+                    else:
+                        self.log(f"Detected edits in '{folder_path}' (found: {file.relative_to(p)})")
+                        self.folder_edit_cache[path_str] = True
+                        return True
                     
         except Exception as e:
             self.log(f"Error scanning for edits in {folder_path}: {e}")
