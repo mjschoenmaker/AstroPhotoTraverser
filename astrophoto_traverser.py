@@ -191,11 +191,11 @@ class AstroScannerCore:
                 meta['camera'] = None
             
             # Invalidate camera if it starts with gain followed by digits
-            if meta.get('camera') and re.match(r'gain\d+|\d{8}|\d+s', meta['camera'], re.IGNORECASE):
+            if meta.get('camera') and re.match(r'gain\d+|\d{8}|\d+s', meta['camera'], re.IGNORECASE): # pyright: ignore[reportArgumentType, reportCallIssue]
                 meta['camera'] = None
 
             # Invalidate camera if it actually is a filter name
-            if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
+            if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS: # type: ignore
                 meta['filter'] = config.identify_filter(meta['camera'])  # move value to filter
                 meta['camera'] = None
 
@@ -234,7 +234,7 @@ class AstroScannerCore:
             ):
             try:
                 with config.fits.open(str(path), mode='readonly') as hdul:
-                    header = hdul[0].header
+                    header = hdul[0].header # type: ignore
                     camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
                     gain = header.get('GAIN')
                     temp = header.get('CCD-TEMP') or header.get('SET-TEMP')
