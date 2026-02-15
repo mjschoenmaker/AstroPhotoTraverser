@@ -28,7 +28,7 @@ class AstroScannerCore:
         file_list = []
         data_rows = []
         
-        self.log("Starting single-pass drive synchronization...")
+        self.log("Reading the directory tree...")
 
         # os.walk is often faster for large trees than Path.rglob
         for current_dir, dirs, files in os.walk(root_path):
@@ -239,8 +239,7 @@ class AstroScannerCore:
                     gain = header.get('GAIN')
                     temp = header.get('CCD-TEMP') or header.get('SET-TEMP')
                     filter_name = header.get('FILTER')
-                    with open('debug.log', 'a') as f:
-                        f.write(f"Fits header read for {file_name}: camera={camera}, gain={gain}, temp={temp}, filter={filter_name}\n")
+                    self.log(f"Fits header read for {file_name}: camera={camera}, gain={gain}, temp={temp}, filter={filter_name}")
                     if camera:
                         meta['camera'] = camera
                         self.session_to_camera[session_info] = meta['camera']  # update cache
@@ -263,8 +262,7 @@ class AstroScannerCore:
                 with open(str(path), 'rb') as f:
                     tags = config.exifread.process_file(f)
                     camera = tags.get('Image Model') or tags.get('EXIF Model')
-                    with open('debug.log', 'a') as f:
-                        f.write(f"Exif header read for {file_name}: camera={camera}\n")
+                    self.log(f"Exif header read for {file_name}: camera={camera}")
                     if camera:
                         meta['camera'] = str(camera)
                         self.session_to_camera[session_info] = meta['camera']  # update cache
