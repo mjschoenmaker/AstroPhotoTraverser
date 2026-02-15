@@ -40,8 +40,10 @@ class AstroScannerCore:
                 name_lower = file.name.lower()
                 if file.suffix.lower() in ['.tif', '.tiff', '.psd']:
                     self.folder_edit_cache[path_str] = True
+                    self.log(f"Detected edits in folder '{folder_path}' due to file: {file.name}")
                     return True
                 if "stack" in name_lower:
+                    self.log(f"Detected edits in folder '{folder_path}' due to file: {file.name}")
                     self.folder_edit_cache[path_str] = True
                     return True
         except Exception:
@@ -121,7 +123,6 @@ class AstroScannerCore:
         
         has_edits = "No"
         if self._has_edits(session_path) or self._has_edits(object_path):
-            self.log(f"Edits detected in session '{session_info}' for file: {file_name}")
             has_edits = "Yes"
 
         # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
