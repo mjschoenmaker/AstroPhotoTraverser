@@ -3,6 +3,7 @@ from tkinter import filedialog, messagebox
 import os
 import csv
 import re
+import time
 from pathlib import Path
 from threading import Thread
 
@@ -426,7 +427,7 @@ class AstroScannerApp(ctk.CTk):
             f.write(f"FITS_AVAILABLE: {config.FITS_AVAILABLE}\n")
             f.write(f"EXIF_AVAILABLE: {config.EXIF_AVAILABLE}\n")
 
-        # 1. Update UI state to 'Processing' mode
+        # 1. Update UI state to 'Initializing' mode
         self.after(0, lambda: self.scan_button.configure(state="disabled"))
         self.log("Initializing scan...")
 
@@ -438,8 +439,16 @@ class AstroScannerApp(ctk.CTk):
         )
 
         try:
+            # --- Capture Start Time ---
+            start_time = time.time()
+
             # 3. Execute logic
             data = core.scan_folder(self.selected_path)
+
+            # --- Calculate Duration ---
+            end_time = time.time()
+            duration = end_time - start_time
+
             if not data:
                 self.after(0, lambda: messagebox.showwarning("No Data", "No compatible files were found."))
                 return
@@ -449,7 +458,7 @@ class AstroScannerApp(ctk.CTk):
             core.save_to_csv(data, output_file)
             
             # 5. Notify UI of completion
-            self.log(f"SUCCESS: {len(data)} files indexed.")
+            self.log(f"SUCCESS: {len(data)} files indexed in {duration:.2f} seconds.")
             self.after(0, lambda: messagebox.showinfo("Done", f"Scan complete!\nSaved to: {output_file}"))
         
         except Exception as e:
