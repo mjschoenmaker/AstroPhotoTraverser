@@ -20,65 +20,57 @@ class AstroScannerCore:
         # Cache edit status to avoid redundant folder scans
         self.folder_edit_cache = {}
 
-    # does the folder contain any files that indicate the images may have been edited (e.g., TIF, PSD, or files with "stack" in the name)? If so, we will skip metadata extraction for all files in that folder since edits often break naming conventions and metadata patterns.
-    def _has_edits(self, folder_path):
-        """Helper to check if a folder contains TIF, PSD, or 'stack' files."""
-        if not folder_path or folder_path == '.':
-            return False
-            
-        path_str = str(folder_path)
-        if path_str in self.folder_edit_cache:
-            return self.folder_edit_cache[path_str]
-
-        try:
-            p = Path(folder_path)
-            if not p.exists():
-                return False
-                
-            # Define our patterns
-            extensions = {'.tif', '.tiff', '.psd'}
-            
-            # Use rglob('*') to look into all subdirectories recursively
-            # We use a generator to exit as soon as we find a single matching file
-            for file in p.rglob('*'):
-                if not file.is_file():
-                    continue
-                    
-                name_lower = file.name.lower()
-                if file.suffix.lower() in extensions or "stack" in name_lower:
-                    # if file is a calibration frame, we should ignore edits in that folder since it's common to have stacks and edits in calibration folders but it doesn't necessarily mean the light frames are edited.
-                    if "darks" in name_lower or "bias" in name_lower or "flat" in name_lower:
-                        self.log(f"Ignoring calibration edits in '{folder_path}' (found: {file.relative_to(p)})")
-                        return False
-                    else:
-                        self.log(f"Detected edits in '{folder_path}' (found: {file.relative_to(p)})")
-                        self.folder_edit_cache[path_str] = True
-                        return True
-                    
-        except Exception as e:
-            self.log(f"Error scanning for edits in {folder_path}: {e}")
-            
-        self.folder_edit_cache[path_str] = False
-        return False
-
     def scan_folder(self, root_path):
-        # The core engine that traverses files and extracts metadata.
         root = Path(root_path)
-        fit_files = list(root.rglob('*.fit*'))
-        cr2_files = list(root.rglob('*.cr2'))
-        dng_files = list(root.rglob('*.dng'))
-        jpg_files = list(root.rglob('*.jpg'))
-        jpeg_files = list(root.rglob('*.jpeg'))
-        file_list = fit_files + cr2_files + dng_files + jpg_files + jpeg_files
-
+        valid_extensions = {'.fit', '.fits', '.cr2', '.dng', '.jpg', '.jpeg'}
+        edit_indicators = {'.tif', '.tiff', '.psd'}
+        
+        file_list = []
         data_rows = []
+        
+        self.log("Starting single-pass drive synchronization...")
+
+        # os.walk is often faster for large trees than Path.rglob
+        for current_dir, dirs, files in os.walk(root_path):
+            curr_p = Path(current_dir)
+            
+            # 1. Check for edits in this specific folder (Shallow check)
+            has_edits_here = False
+            for f in files:
+                f_lower = f.lower()
+                if any(f_lower.endswith(ext) for ext in edit_indicators) or "stack" in f_lower:
+                    # Ignore calibration folder edits
+                    if not any(k in current_dir.lower() for k in ["darks", "bias", "flats"]):
+                        has_edits_here = True
+                        break
+            
+            # Cache the result
+            # If this subfolder has edits, mark its parents as having edits too
+            if has_edits_here:
+                temp_p = curr_p
+                # Bubble up to the root to ensure parent session/object folders see it
+                while temp_p != root and temp_p != temp_p.parent:
+                    self.folder_edit_cache[str(temp_p)] = True
+                    temp_p = temp_p.parent
+            else:
+                # Only set to False if not already set to True by a deeper subfolder
+                if str(curr_p) not in self.folder_edit_cache:
+                    self.folder_edit_cache[str(curr_p)] = False
+
+            # 2. Collect image files from this folder
+            for f in files:
+                file_path = curr_p / f
+                if file_path.suffix.lower() in valid_extensions:
+                    file_list.append(file_path)
+
         total_files = len(file_list)
+        self.log(f"Found {total_files} images. Extracting metadata...")
+
         for idx, path in enumerate(file_list, start=1):
             row = self._extract_metadata(path, root)
             if row:
                 data_rows.append(row)
             
-            # Send the update to the UI every 50 files
             if idx % 50 == 0 or idx == total_files:
                 self.progress(idx, total_files)      
         
@@ -127,11 +119,12 @@ class AstroScannerCore:
             obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
 
         # Check both the session folder (parent) and the object folder (grandparent) for signs of edits.
-        session_path = path.parent
-        object_path = session_path.parent if session_path else None
-        
+        session_path_str = str(path.parent)
+        object_path_str = str(path.parent.parent) if path.parent else None
+
+        # O(1) Lookup from the cache we built during the walk
         has_edits = "No"
-        if self._has_edits(session_path) or self._has_edits(object_path):
+        if self.folder_edit_cache.get(session_path_str) or self.folder_edit_cache.get(object_path_str):
             has_edits = "Yes"
 
         # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)

@@ -49,10 +49,12 @@ def test_filter_in_session(scanner, tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text("fake fits data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -62,6 +64,7 @@ def test_filter_in_session(scanner, tmp_path):
     assert result['Gain'] == "456" 
     assert result['Temp'] == "-273"
     assert result['Rotation'] == "123"
+    assert result['Edits Detected'] == "No"
 
 def test_filter_in_filename(scanner, tmp_path):
     # Create a real folder structure
@@ -69,10 +72,12 @@ def test_filter_in_filename(scanner, tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text("fake fits data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -82,6 +87,7 @@ def test_filter_in_filename(scanner, tmp_path):
     assert result['Gain'] == "456" 
     assert result['Temp'] == "-273"
     assert result['Rotation'] == "123"
+    assert result['Edits Detected'] == "No"
 
 def test_ignore_filter_in_session(scanner, tmp_path):
     # Create a real folder structure
@@ -89,10 +95,12 @@ def test_ignore_filter_in_session(scanner, tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text("fake fits data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -102,6 +110,7 @@ def test_ignore_filter_in_session(scanner, tmp_path):
     assert result['Gain'] == "456" 
     assert result['Temp'] == "-273"
     assert result['Rotation'] == "123"
+    assert result['Edits Detected'] == "No"
 
 def test_missing_telescope(scanner, tmp_path):
     # Create a real folder structure
@@ -109,10 +118,12 @@ def test_missing_telescope(scanner, tmp_path):
     path.parent.mkdir(parents=True)
     path.write_text("fake fits data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "missing info"
     assert result['Object'] == "M105 - triplet in Leo"
     assert result['Exposure'] == "67.0"
@@ -122,6 +133,7 @@ def test_missing_telescope(scanner, tmp_path):
     assert result['Gain'] == "456" 
     assert result['Temp'] == "-273"
     assert result['Rotation'] == "123"
+    assert result['Edits Detected'] == "No"
 
 def test_folder_with_tif_edits_in_session(scanner, tmp_path):
     # Create a real folder structure
@@ -134,10 +146,12 @@ def test_folder_with_tif_edits_in_session(scanner, tmp_path):
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake tif data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -160,10 +174,12 @@ def test_folder_with_tif_edits_in_session_subfolders(scanner, tmp_path):
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake tif data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -186,10 +202,12 @@ def test_folder_with_tif_edits_for_telescope(scanner, tmp_path):
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake tif data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -212,10 +230,12 @@ def test_folder_with_psd_edits_in_session(scanner, tmp_path):
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake psd data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -238,10 +258,12 @@ def test_folder_with_psd_edits_for_telescope(scanner, tmp_path):
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake psd data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -264,10 +286,12 @@ def test_folder_with_stack_edits_in_session(scanner, tmp_path):
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake file data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
@@ -290,10 +314,12 @@ def test_folder_with_stack_edits_for_telescope(scanner, tmp_path):
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake file data") # create a dummy file
 
-    # Call the extract_metadata method
-    result = scanner._extract_metadata(path, tmp_path)
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(tmp_path))
 
     # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
     assert result['Telescope'] == "2000mm Telescope"
     assert result['Object'] == "M42"
     assert result['Exposure'] == "67.0"
