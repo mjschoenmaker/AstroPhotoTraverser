@@ -17,7 +17,18 @@ except ImportError:
 if False:
     import astropy.io.fits
     import exifread
-    
+
+# --- FILE TYPE CONFIGURATION ---
+# Map file extensions to their respective metadata extraction methods    
+FILE_TYPES = {
+    '.fit': 'fits',
+    '.fits': 'fits',
+    '.cr2': 'exif',
+    '.dng': 'exif',
+    '.jpg': 'exif',
+    '.jpeg': 'exif'
+}
+
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
     'lxtrme': 'L-eXtreme',

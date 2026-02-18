@@ -27,14 +27,16 @@ class AstroScannerCore:
         self.session_cache: dict[str, SessionMetadata] = {}
         self.folder_edit_cache = {}
 
-        # Map extensions to their respective extraction methods
+        # Map the extraction methods
+        method_map = {
+            'fits': self._get_metadata_from_fits_header,
+            'exif': self._get_metadata_from_exif
+        }
+
+        # Map the file extensions to their respective extraction methods based on config
         self._extractors = {
-            '.fit': self._get_metadata_from_fits_header,
-            '.fits': self._get_metadata_from_fits_header,
-            '.cr2': self._get_metadata_from_exif,
-            '.dng': self._get_metadata_from_exif,
-            '.jpg': self._get_metadata_from_exif,
-            '.jpeg': self._get_metadata_from_exif,
+            ext: method_map[ext_type]
+            for ext, ext_type in config.FILE_TYPES.items()
         }
 
     def _sync_session_data(self, meta, session: SessionMetadata):
@@ -55,7 +57,7 @@ class AstroScannerCore:
 
     def scan_folder(self, root_path):
         root = Path(root_path)
-        valid_extensions = {'.fit', '.fits', '.cr2', '.dng', '.jpg', '.jpeg'}
+        valid_extensions = config.FILE_TYPES.keys()
         edit_indicators = {'.tif', '.tiff', '.psd'}
         
         file_list = []
