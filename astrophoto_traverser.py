@@ -221,37 +221,6 @@ class AstroScannerCore:
         else:
             meta = self._fallback_token_search(file_name)
 
-            # Attempt to identify camera token: look for token after Bin
-            if 'camera' not in meta:
-                tokens = [t for t in re.split(r'[_\-]', file_name) if t]
-                bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
-                if bin_indices:
-                    bin_idx = bin_indices[0]
-                    if bin_idx + 1 < len(tokens):
-                        candidate = tokens[bin_idx + 1]
-                        if re.match(r'^[A-Za-z0-9]+$', candidate):
-                            meta['camera'] = candidate
-
-            # Invalidate camera if it starts with ISO followed by digits
-            if meta.get('camera') and re.match(r'ISO\d+', meta['camera'], re.IGNORECASE):
-                meta['camera'] = None
-            
-            # Invalidate camera if it starts with gain followed by digits
-            if meta.get('camera') and re.match(r'gain\d+|\d{8}|\d+s', meta['camera'], re.IGNORECASE): # pyright: ignore[reportArgumentType, reportCallIssue]
-                meta['camera'] = None
-
-            # Invalidate camera if it actually is a filter name
-            if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS: # type: ignore
-                meta['filter'] = config.identify_filter(meta['camera'])  # move value to filter
-                meta['camera'] = None
-
-            # Try to get filter from filename, when one of filter_keywords delimited by _ is found.
-            if not meta.get('filter'):
-                for key, formal_name in config.FILTER_KEYWORDS.items():
-                    if re.search(r'[_\-]' + re.escape(key) + r'[_\-]', file_name, re.IGNORECASE):
-                        meta['filter'] = formal_name
-                        break
-
         return self._cleanup_parsed_metadata(meta, file_name)
 
     def _fallback_token_search(self, file_name):
