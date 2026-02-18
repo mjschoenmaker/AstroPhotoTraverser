@@ -252,7 +252,31 @@ class AstroScannerCore:
             if match:
                 meta[key] = match.group('v')
 
-        # 2. Attempt to identify camera token
+        return meta
+
+    def _cleanup_parsed_metadata(self, meta, file_name):
+        """
+        Sanitizes raw metadata extracted from filenames. 
+        Handles invalid patterns and cross-field mapping (e.g., camera vs. filter).
+        """
+
+        camera = meta.get('camera')
+        # 1. Invalidate camera if it matches non-camera patterns (e.g., 'gain120' or timestamps)
+        if camera:
+            is_timestamp = re.match(r'^\d{8}$|^\d{8}-\d{6}$', camera)
+            is_gain_iso = re.match(r'^(gain|ISO)\d+', camera, re.IGNORECASE)
+
+            if is_timestamp or is_gain_iso:
+                meta['camera'] = None
+
+        # 2. Invalidate camera if it is actually a known filter name
+        if camera and str(camera).lower() in config.FILTER_KEYWORDS:
+            # Move the value to filter if we don't have one yet
+            if not meta.get('filter'):
+                meta['filter'] = config.identify_filter(meta['camera'])
+            meta['camera'] = None
+
+        # 3. Attempt to identify camera token
         # Look for a alphanumeric token immediately following the 'Bin' marker
         tokens = [t for t in re.split(r'[_\-]', file_name) if t]
         bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
@@ -265,30 +289,7 @@ class AstroScannerCore:
                 if re.match(r'^[A-Za-z0-9]+$', candidate):
                     meta['camera'] = candidate
 
-        return meta
-
-    def _cleanup_parsed_metadata(self, meta, file_name):
-        """
-        Sanitizes raw metadata extracted from filenames. 
-        Handles invalid patterns and cross-field mapping (e.g., camera vs. filter).
-        """
-        # 1. Invalidate camera if it matches non-camera patterns (e.g., 'gain120' or timestamps)
-        if meta.get('camera'):
-            # Check for 'gain' or 'ISO' prefixes often caught by loose regex
-            if re.match(r'(gain|ISO)\d+', meta['camera'], re.IGNORECASE):
-                meta['camera'] = None
-            # Check for pure numeric strings like timestamps or exposure (e.g., '20250405' or '180s')
-            elif re.match(r'^\d{8}$|^\d+s$', meta['camera']):
-                meta['camera'] = None
-
-        # 2. Invalidate camera if it is actually a known filter name
-        if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
-            # Move the value to filter if we don't have one yet
-            if not meta.get('filter'):
-                meta['filter'] = config.identify_filter(meta['camera'])
-            meta['camera'] = None
-
-        # 3. Last-ditch attempt to find filter in the filename if still missing
+        # 4. Last-ditch attempt to find filter in the filename if still missing
         if not meta.get('filter'):
             for key, formal_name in config.FILTER_KEYWORDS.items():
                 # Look for filter keywords delimited by underscores or dashes
