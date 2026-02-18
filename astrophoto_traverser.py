@@ -6,19 +6,25 @@ import re
 import time
 from pathlib import Path
 from threading import Thread
+from dataclasses import dataclass
+from typing import Optional
 
 import config
+
+@dataclass
+class SessionMetadata:
+    camera: Optional[str] = None
+    filter: Optional[str] = None
+    gain: Optional[str] = None
+    exposure: Optional[str] = None
+    temperature: Optional[str] = None
 
 class AstroScannerCore:
     def __init__(self, log_callback=None, progress_callback=None):
         self.log = log_callback or (lambda x: None)
         self.progress = progress_callback or (lambda x, y: None)
-        # Cache values to avoid redundant folder scans
-        self.session_to_camera = {}
-        self.session_to_filter = {}
-        self.session_to_gain = {}
-        self.session_to_exp = {}
-        self.session_to_temp = {} 
+        # Cache values to avoid redundant folder scans using the SessionMetaData dataclass
+        self.session_cache: dict[str, SessionMetadata] = {}
         self.folder_edit_cache = {}
 
     def scan_folder(self, root_path):
@@ -183,8 +189,6 @@ class AstroScannerCore:
         # First, extract basic metadata from the file path structure (Object, Telescope, Session)
         obj_name, telescope, session_info = self._get_metadata_from_path(path, root)
 
-        cache_key = str(path.parent)  # Cache based on the session folder
-
         # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
         parent_name = (session_info or '').strip()
         if not config.DATE_FOLDER_RE.match(parent_name):
@@ -264,24 +268,51 @@ class AstroScannerCore:
                         meta['filter'] = formal_name
                         break
 
+        cache_key = str(path.parent)  # Cache based on the session folder
+        if cache_key not in self.session_cache:
+            self.session_cache[cache_key] = SessionMetadata()
+        
+        session = self.session_cache[cache_key]
+
         # Use cached camera from session if available
-        if not meta.get('camera') and cache_key in self.session_to_camera:
-            meta['camera'] = self.session_to_camera[cache_key]
+        if not meta.get('camera') and session.camera is not None:
+            meta['camera'] = session.camera
         elif meta.get('camera'):
-            self.session_to_camera[cache_key] = meta['camera']
+            session.camera = meta['camera']
 
         # Use cached gain from session if available
-        if not meta.get('gain') and cache_key in self.session_to_gain:
-            meta['gain'] = self.session_to_gain[cache_key]
+        if not meta.get('gain') and session.gain is not None:
+            meta['gain'] = session.gain
+        elif meta.get('gain'):
+            session.gain = meta['gain']
+
         # Use cached exposure time from session if available
-        if not meta.get('exp') and cache_key in self.session_to_exp:
-            meta['exp'] = self.session_to_exp[cache_key]
+        if not meta.get('exp') and session.exposure is not None:
+            meta['exp'] = session.exposure
+        elif meta.get('exp'):
+            session.exposure = meta['exp']
+
         # Use cached temperature from session if available
-        if not meta.get('temp') and cache_key in self.session_to_temp:
-            meta['temp'] = self.session_to_temp[cache_key]
+        if not meta.get('temp') and session.temperature is not None:
+            meta['temp'] = session.temperature
+        elif meta.get('temp'):
+            session.temperature = meta['temp']
+
         # Use cached filter from session if available
-        if not meta.get('filter') and cache_key in self.session_to_filter:
-            meta['filter'] = self.session_to_filter[cache_key]
+        if not meta.get('filter') and session.filter is not None:
+            meta['filter'] = session.filter
+        elif meta.get('filter'):
+            session.filter = meta['filter']         
+            meta['gain'] = session.gain
+        # Use cached exposure time from session if available
+        if not meta.get('exp') and session.exposure is not None:
+            meta['exp'] = session.exposure
+        # Use cached temperature from session if available
+        if not meta.get('temp') and session.temperature is not None:
+            meta['temp'] = session.temperature
+        # Use cached filter from session if available
+        if not meta.get('filter') and session.filter is not None:
+            meta['filter'] = session.filter
 
         # Try to read missing info from FITS header (only for FIT files that pass checks)
         if is_fit and config.FITS_AVAILABLE and (
@@ -291,39 +322,39 @@ class AstroScannerCore:
             camera, gain, temp, filter_name = self._get_metadata_from_fits_header(path)
             if camera:
                 meta['camera'] = camera
-                self.session_to_camera[cache_key] = meta['camera']
+                session.camera = meta['camera']
             if gain:
                 meta['gain'] = gain
-                self.session_to_gain[cache_key] = meta['gain']
+                session.gain = meta['gain']
             if temp:
                 meta['temp'] = temp
-                self.session_to_temp[cache_key] = meta['temp']
+                session.temperature = meta['temp']
             if filter_name:
                 meta['filter'] = config.identify_filter(filter_name)
-                self.session_to_filter[cache_key] = meta['filter']
+                session.filter = meta['filter']
 
         # Try to read missing camera from EXIF (for non-FIT files)
         if not is_fit and config.EXIF_AVAILABLE and not meta.get('camera'):
             camera, gain, exp_time, temp = self._get_metadata_from_exif(path)
             if camera:
                 meta['camera'] = camera
-                self.session_to_camera[cache_key] = meta['camera']
+                session.camera = meta['camera']
             if gain:
                 meta['gain'] = gain
-                self.session_to_gain[cache_key] = meta['gain']
+                session.gain = meta['gain']
             if exp_time:
                 meta['exp'] = exp_time
-                self.session_to_exp[cache_key] = meta['exp']
+                session.exposure = meta['exp']
             if temp:
                 meta['temp'] = temp
-                self.session_to_temp[cache_key] = meta['temp']
+                session.temperature = meta['temp']
 
         # As a last resort, try to identify filter from session folder name if not found in filename or FITS header
         if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
             meta['filter'] = config.identify_filter(session_info)
             # cache filter if succesfully identified from session folder, since it's likely consistent for the session
             if meta['filter'] not in [None, 'Broadband/Unknown']:
-                self.session_to_filter[cache_key] = meta['filter']
+                session.filter = meta['filter']
        
         # If still missing major metadata, log a skipped-file note but still include minimal info
         if not meta:
