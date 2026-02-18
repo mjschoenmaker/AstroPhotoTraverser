@@ -43,6 +43,19 @@ def test_folder_structure_regex(scanner, tmp_path):
     
     assert match is not None # there is a date folder
 
+def test_get_metadata_from_path(scanner, tmp_path):
+    """
+    Tests if the get_metadata_from_path method correctly extracts metadata from a given path.
+    """
+    # Simulate a path
+    test_path = Path("M42/2000mm Telescope/2024-02-07 Backyard UVIR/Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_gain456_001.fits")
+    
+    obj_name, telescope, session_info = scanner._get_metadata_from_path(test_path, "")
+    
+    assert obj_name == "M42"
+    assert telescope == "2000mm Telescope"
+    assert session_info == "2024-02-07 Backyard UVIR"
+
 def test_filter_in_session(scanner, tmp_path):
     # Create a real folder structure
     path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard UVIR" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_gain456_001.fits"
