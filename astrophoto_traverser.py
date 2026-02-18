@@ -13,12 +13,12 @@ class AstroScannerCore:
     def __init__(self, log_callback=None, progress_callback=None):
         self.log = log_callback or (lambda x: None)
         self.progress = progress_callback or (lambda x, y: None)
+        # Cache values to avoid redundant folder scans
         self.session_to_camera = {}
         self.session_to_filter = {}
         self.session_to_gain = {}
         self.session_to_exp = {}
         self.session_to_temp = {} 
-        # Cache edit status to avoid redundant folder scans
         self.folder_edit_cache = {}
 
     def scan_folder(self, root_path):
@@ -87,37 +87,54 @@ class AstroScannerCore:
             dict_writer.writeheader()
             dict_writer.writerows(data_rows)
 
+    def _get_metadata_from_path(self, path, root):
+        """
+        Extracts Object, Telescope, and Session info by analyzing the directory 
+        hierarchy relative to the scan root.
+        """
+        try:
+            # path.relative_to(root) gives us only the folders inside the selected target
+            rel_parts = path.relative_to(Path(root)).parts
+            num_parts = len(rel_parts)
+            
+            # rel_parts index 0 is usually the 'Object' (e.g., M42)
+            # The last part is the filename, so we ignore it.
+            # We look for the 'Session' (the folder starting with a date)
+            
+            obj_name = rel_parts[0] if num_parts > 1 else ''
+            telescope = 'missing info'
+            session_info = ''
+
+            # Find the session folder by checking parts from right to left
+            # (excluding the filename at the end)
+            for i in range(num_parts - 2, -1, -1):
+                if config.DATE_FOLDER_RE.match(rel_parts[i]):
+                    session_info = rel_parts[i]
+                    # If there's a folder between Object and Session, it's the Telescope
+                    if i > 1:
+                        telescope = rel_parts[i-1]
+                    break
+            
+            # Fallback if no date folder was found in the relative path
+            if not session_info:
+                session_info = path.parent.name if path.parent else ''
+
+            return obj_name, telescope, session_info
+
+        except (ValueError, IndexError):
+            # Fallback for files outside the root or unexpected structures
+            session_info = path.parent.name if path.parent else ''
+            telescope = path.parent.parent.name if path.parent and path.parent.parent else 'missing info'
+            obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
+            return obj_name, telescope, session_info
+
     # This method is the heart of the metadata extraction logic. It takes a file path and the root directory, and returns a dictionary of extracted metadata.
     def _extract_metadata(self, path, root):
         file_name = path.name
         is_fit = file_name.lower().endswith(('.fit', '.fits'))
 
-        # Extract path components relative to selected root
-        try:
-            rel_parts = path.relative_to(Path(root)).parts
-            num_parts = len(rel_parts)
-            if num_parts >= 3:
-                obj_name = rel_parts[0]
-                if num_parts == 3:
-                    telescope = 'missing info'
-                    session_info = rel_parts[1]
-                else:  # num_parts >= 4
-                    # in case of missing telescope folder, we are likely to have to treat rel_parts[1] as session and leave telescope empty.
-                    if config.DATE_FOLDER_RE.match(rel_parts[1]):
-                        telescope = 'missing info'
-                        session_info = rel_parts[1]
-                    else:
-                        telescope = rel_parts[1]
-                        session_info = rel_parts[2]
-            else:
-                obj_name = ''
-                telescope = 'missing info'
-                session_info = path.parent.name if path.parent else ''
-        except ValueError:
-            # If relative_to fails, fall back to old method
-            session_info = path.parent.name if path.parent is not None else ''
-            telescope = path.parent.parent.name if path.parent and path.parent.parent else 'missing info'
-            obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
+        # First, extract basic metadata from the file path structure (Object, Telescope, Session)
+        obj_name, telescope, session_info = self._get_metadata_from_path(path, root)
 
         # Check both the session folder (parent) and the object folder (grandparent) for signs of edits.
         session_path_str = str(path.parent)
