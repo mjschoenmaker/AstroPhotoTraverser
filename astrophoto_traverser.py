@@ -27,6 +27,16 @@ class AstroScannerCore:
         self.session_cache: dict[str, SessionMetadata] = {}
         self.folder_edit_cache = {}
 
+        # Map extensions to their respective extraction methods
+        self._extractors = {
+            '.fit': self._get_metadata_from_fits_header,
+            '.fits': self._get_metadata_from_fits_header,
+            '.cr2': self._get_metadata_from_exif,
+            '.dng': self._get_metadata_from_exif,
+            '.jpg': self._get_metadata_from_exif,
+            '.jpeg': self._get_metadata_from_exif,
+        }
+
     def _sync_session_data(self, meta, session: SessionMetadata):
             """
             Private helper to synchronize found metadata with the session cache.
@@ -150,24 +160,6 @@ class AstroScannerCore:
             obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
             return obj_name, telescope, session_info
 
-    def _get_metadata_from_fits_header(self, path):
-        """FITS header extraction logic."""
-        try:
-            with config.fits.open(str(path), mode='readonly') as hdul:
-                header = hdul[0].header  # type: ignore
-                camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
-                gain = header.get('GAIN')
-                temp = header.get('CCD-TEMP') or header.get('SET-TEMP')
-                exposure = header.get('EXPTIME')
-                filter = header.get('FILTER')
-                
-                self.log(f"Fits header read for {path.name}: camera={camera}, gain={gain}, exposure={exposure}, filter={filter}")
-                return camera, gain, temp, exposure, filter
-        except Exception as e:
-            with open('debug.log', 'a') as f:
-                f.write(f"Failed to read fits header for {path.name}: {e}\n")
-            return None, None, None, None, None # Return 5 values to prevent unpack errors
-
     def _format_exposure_time(self, exp_time):
         """Converts EXIF exposure time to a consistent string format in seconds."""
         exp_str = str(exp_time)
@@ -181,27 +173,45 @@ class AstroScannerCore:
         else:
             return exp_str  # Already in seconds format
 
+    def _get_metadata_from_fits_header(self, path):
+        """FITS strategy: returns a dict of metadata."""
+        if not config.FITS_AVAILABLE:
+            return {}
+        try:
+            with config.fits.open(str(path), mode='readonly') as hdul:
+                header = hdul[0].header # type: ignore
+                # Return keys that match our dataclass fields
+                return {
+                    'camera': header.get('INSTRUME') or header.get('CAMERA'),
+                    'gain': str(header.get('GAIN', '')),
+                    'temperature': str(header.get('CCD-TEMP') or header.get('SET-TEMP', '')),
+                    'exposure': str(header.get('EXPTIME', '')),
+                    'filter': config.identify_filter(header.get('FILTER'))
+                }
+        except Exception as e:
+            self.log(f"FITS Error: {e}")
+            return {}
+
     def _get_metadata_from_exif(self, path):
-        """EXIF header extraction logic for non-FITS files."""
+        """EXIF strategy: returns a dict of metadata."""
+        if not config.EXIF_AVAILABLE:
+            return {}
         try:
             with open(str(path), 'rb') as f:
                 tags = config.exifread.process_file(f)
-                camera = tags.get('Image Model') or tags.get('EXIF Model')
-                gain = tags.get('EXIF ISOSpeedRatings')
-                exposure = tags.get('EXIF ExposureTime')
-                temperature = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
-                
-                self.log(f"Exif header read for {path.name}: camera={camera}, gain={gain}, exposure={exposure}, temperature={temperature}")
-                return camera, gain, self._format_exposure_time(exposure), temperature
+                return {
+                    'camera': str(tags.get('Image Model') or ''),
+                    'gain': str(tags.get('EXIF ISOSpeedRatings') or ''),
+                    'exposure': self._format_exposure_time(tags.get('EXIF ExposureTime')),
+                    'temperature': str(tags.get('EXIF CameraTemperature') or '')
+                }
         except Exception as e:
-            with open('debug.log', 'a') as f:
-                f.write(f"Failed to read exif header for {path.name}: {e}\n")
-            return None, None, None, None # Return 4 values to prevent unpack errors
+            self.log(f"EXIF Error: {e}")
+            return {}
 
     # This method is the heart of the metadata extraction logic. It takes a file path and the root directory, and returns a dictionary of extracted metadata.
     def _extract_metadata(self, path, root):
         file_name = path.name
-        is_fit = file_name.lower().endswith(('.fit', '.fits'))
 
         # First, extract basic metadata from the file path structure (Object, Telescope, Session)
         obj_name, telescope, session_info = self._get_metadata_from_path(path, root)
@@ -285,54 +295,24 @@ class AstroScannerCore:
                         meta['filter'] = formal_name
                         break
 
-        cache_key = str(path.parent)  # Cache based on the session folder
-        if cache_key not in self.session_cache:
-            self.session_cache[cache_key] = SessionMetadata()
-        
-        session = self.session_cache[cache_key]
+        session_folder = str(path.parent)  # Cache based on the session folder
+        if session_folder not in self.session_cache:
+            self.session_cache[session_folder] = SessionMetadata()
+        session = self.session_cache[session_folder]
+
+        # get the extractor functions based on file extension and extract metadata from the file header if possible
+        ext = path.suffix.lower()
+        extractor_func = self._extractors.get(ext)
+        if extractor_func:
+            # Get the metadata from the appropriate extractor
+            extracted_meta = extractor_func(path)
+            # Sync with session cache to fill in any missing values
+            self._sync_session_data(extracted_meta, session)
+            # Update meta with any new info found from the file header
+            meta.update({k: v for k, v in extracted_meta.items() if v})
 
         # Sync metadata with session cache, ensuring we pull from session if missing and update session if found
         self._sync_session_data(meta, session)
-
-        # Try to read missing info from FITS header (only for FIT files that pass checks)
-        if is_fit and config.FITS_AVAILABLE and (
-            not meta.get('camera') or not meta.get('gain') or not meta.get('temperature') or not meta.get('exposure') or not meta.get('filter')
-        ):
-            # Get the metadata from the FITS header
-            camera, gain, temperature, exposure, filter = self._get_metadata_from_fits_header(path)
-            if camera:
-                meta['camera'] = camera
-                session.camera = meta['camera']
-            if gain:
-                meta['gain'] = gain
-                session.gain = meta['gain']
-            if temperature:
-                meta['temperature'] = temperature
-                session.temperature = meta['temperature']
-            if exposure:
-                meta['exposure'] = exposure
-                session.exposure = meta['exposure']
-            if filter:
-                meta['filter'] = config.identify_filter(filter)
-                session.filter = meta['filter']
-
-        # Try to read missing camera from EXIF (for non-FIT files)
-        if not is_fit and config.EXIF_AVAILABLE and ( 
-            not meta.get('camera') or not meta.get('gain') or not meta.get('temperature') or not meta.get('exposure')
-        ):
-            camera, gain, exposure, temperature = self._get_metadata_from_exif(path)
-            if camera:
-                meta['camera'] = camera
-                session.camera = meta['camera']
-            if gain:
-                meta['gain'] = gain
-                session.gain = meta['gain']
-            if exposure:
-                meta['exposure'] = exposure
-                session.exposure = meta['exposure']
-            if temperature:
-                meta['temperature'] = temperature
-                session.temperature = meta['temperature']
 
         # As a last resort, try to identify filter from session folder name if not found in filename or FITS header
         if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
