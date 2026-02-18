@@ -265,18 +265,6 @@ class AstroScannerCore:
         Sanitizes raw metadata extracted from filenames. 
         Handles invalid patterns and cross-field mapping (e.g., camera vs. filter).
         """
-
-        # Attempt to identify camera token: look for token after Bin
-        if 'camera' not in meta:
-            tokens = [t for t in re.split(r'[_\-]', file_name) if t]
-            bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
-            if bin_indices:
-                bin_idx = bin_indices[0]
-                if bin_idx + 1 < len(tokens):
-                    candidate = tokens[bin_idx + 1]
-                    if re.match(r'^[A-Za-z0-9]+$', candidate):
-                        meta['camera'] = candidate
-
         # 1. Invalidate camera if it matches non-camera patterns (e.g., 'gain120' or timestamps)
         if meta.get('camera'):
             # Check for 'gain' or 'ISO' prefixes often caught by loose regex
