@@ -228,7 +228,7 @@ class AstroScannerCore:
         else:
             meta = self._fallback_token_search(file_name)
 
-        return self._cleanup_parsed_metadata(meta, file_name)
+        return meta
 
     def _fallback_token_search(self, file_name):
         """
@@ -375,8 +375,9 @@ class AstroScannerCore:
             self.log(f"Note: filename did not match expected patterns: {file_name}")
             return
 
-        # 8. Formatting the result
-        return self._build_result_row(path, meta, obj_name, telescope, session_info)
+        # 8. Cleaning and then formatting the result
+        clean_meta = self._cleanup_parsed_metadata(meta, file_name)
+        return self._build_result_row(path, clean_meta, obj_name, telescope, session_info)
 
     def _build_result_row(self, path, meta, obj_name, telescope, session_info):
         # Check both the session folder (parent) and the object folder (grandparent) for signs of edits.
