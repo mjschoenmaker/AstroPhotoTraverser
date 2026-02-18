@@ -325,25 +325,35 @@ class AstroScannerCore:
         
         return True
 
-    # This method is the heart of the metadata extraction logic. It takes a file path and the root directory, and returns a dictionary of extracted metadata.
     def _extract_metadata(self, path, root):
+        """
+        Extracts metadata from the file using multiple strategies:
+        1. Basic metadata from the file path structure (Object, Telescope, Session)
+        2. Validation based on naming and folder conventions
+        3. Metadata from the filename using regex and keyword searches
+        4. Metadata from the file header using the appropriate extractor based on file extension
+        5. Syncing metadata with session cache to fill in missing values and ensure consistency
+        6. As a last resort, try to identify filter from session folder name if not found in filename or file header
+        7. If still missing major metadata, log a skipped-file note but still include minimal info
+        8. Formatting the result into a consistent dictionary for CSV output
+        """
         file_name = path.name
-
-        # First, extract basic metadata from the file path structure (Object, Telescope, Session)
-        obj_name, telescope, session_info = self._get_metadata_from_path(path, root)
-
-        # Validate file based on naming and folder conventions before doing any heavy lifting
-        if not self._is_valid_file(path, session_info):
-            return None
-
-        # parse metadata from the filename using regex and keyword searches
-        meta = self._get_medata_from_filename(file_name)
-
         session_folder = str(path.parent)  # Cache based on the session folder
         if session_folder not in self.session_cache:
             self.session_cache[session_folder] = SessionMetadata()
         session = self.session_cache[session_folder]
 
+        # 1. Basic metadata from the file path structure (Object, Telescope, Session)
+        obj_name, telescope, session_info = self._get_metadata_from_path(path, root)
+
+        # 2. Validation based on naming and folder conventions
+        if not self._is_valid_file(path, session_info):
+            return None
+
+        # 3. Metadata from the filename using regex and keyword searches
+        meta = self._get_medata_from_filename(file_name)
+
+        # 4. Metadata from the file header using the appropriate extractor based on file extension
         # get the extractor functions based on file extension and extract metadata from the file header if possible
         ext = path.suffix.lower()
         extractor_func = self._extractors.get(ext)
@@ -355,22 +365,22 @@ class AstroScannerCore:
             # Update meta with any new info found from the file header
             meta.update({k: v for k, v in extracted_meta.items() if v})
 
-        # Sync metadata with session cache, ensuring we pull from session if missing and update session if found
+        # 5. Syncing metadata with session cache to fill in missing values and ensure consistency
         self._sync_session_data(meta, session)
 
-        # As a last resort, try to identify filter from session folder name if not found in filename or file header
+        # 6. As a last resort, try to identify filter from session folder name if not found in filename or file header
         if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
             meta['filter'] = config.identify_filter(session_info)
             # cache filter if succesfully identified from session folder, since it's likely consistent for the session
             if meta['filter'] not in [None, 'Broadband/Unknown']:
                 session.filter = meta['filter']
        
-        # If still missing major metadata, log a skipped-file note but still include minimal info
+        # 7. If still missing major metadata, log a skipped-file note
         if not meta:
             self.log(f"Note: filename did not match expected patterns: {file_name}")
             return
 
-        # 6. Formatting the result
+        # 8. Formatting the result
         return self._build_result_row(path, meta, obj_name, telescope, session_info)
 
     def _build_result_row(self, path, meta, obj_name, telescope, session_info):
