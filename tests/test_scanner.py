@@ -23,13 +23,13 @@ def test_filename_regex_parsing(scanner, tmp_path):
     match = config.FILE_REGEX.search(test_filename)
     
     assert match is not None
-    assert match.group('exp') == "180.0"
+    assert match.group('exposure') == "180.0"
     assert match.group('bin') == "1"
     assert match.group('camera') == "294MC"
     assert match.group('filter') == "L-Extreme"
     assert match.group('gain') == "120"
     assert match.group('timestamp') == "20250405-214232"
-    assert match.group('temp') == "-10"
+    assert match.group('temperature') == "-10"
     assert match.group('rotation') == "90"
 
 def test_folder_structure_regex(scanner, tmp_path):

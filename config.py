@@ -67,13 +67,13 @@ FILTER_KEYWORDS = {
 }
 
 FILE_REGEX = re.compile(
-    r'_(?P<exp>[\d.]+)s'                # 180.0s
+    r'_(?P<exposure>[\d.]+)s'                # 180.0s
     r'_Bin(?P<bin>\d+)'                 # Bin1
     r'_(?P<camera>[^_]+)'               # 294MC
     r'(?:_(?P<filter>[^_]+))?'          # optional filter
     r'_gain(?P<gain>\d+)'               # gain120
     r'_(?P<timestamp>\d{8}-\d{6})'      # 20250405-214232
-    r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C'  # -10C or -10.5C
+    r'_(?P<temperature>-?[\d]+(?:\.[\d]+)?)C'  # -10C or -10.5C
     r'_(?P<rotation>\d+)deg'            # 90deg
 )
 
