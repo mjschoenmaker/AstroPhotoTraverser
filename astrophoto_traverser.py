@@ -158,14 +158,15 @@ class AstroScannerCore:
                 camera = header.get('INSTRUME') or header.get('CAMERA') or header.get('TELESCOP')
                 gain = header.get('GAIN')
                 temp = header.get('CCD-TEMP') or header.get('SET-TEMP')
-                filter_name = header.get('FILTER')
+                exposure = header.get('EXPTIME')
+                filter = header.get('FILTER')
                 
-                self.log(f"Fits header read for {path.name}: camera={camera}, gain={gain}")
-                return camera, gain, temp, filter_name
+                self.log(f"Fits header read for {path.name}: camera={camera}, gain={gain}, exposure={exposure}, filter={filter}")
+                return camera, gain, temp, exposure, filter
         except Exception as e:
             with open('debug.log', 'a') as f:
                 f.write(f"Failed to read fits header for {path.name}: {e}\n")
-            return None, None, None, None # Return 4 values to prevent unpack errors
+            return None, None, None, None, None # Return 5 values to prevent unpack errors
 
     def _format_exposure_time(self, exp_time):
         """Converts EXIF exposure time to a consistent string format in seconds."""
@@ -187,11 +188,11 @@ class AstroScannerCore:
                 tags = config.exifread.process_file(f)
                 camera = tags.get('Image Model') or tags.get('EXIF Model')
                 gain = tags.get('EXIF ISOSpeedRatings')
-                exp_time = tags.get('EXIF ExposureTime')
-                temp = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
+                exposure = tags.get('EXIF ExposureTime')
+                temperature = tags.get('EXIF CameraTemperature') or tags.get('EXIF AmbientTemperature') or tags.get('EXIF SensorTemperature')
                 
-                self.log(f"Exif header read for {path.name}: camera={camera}, gain={gain}, exp_time={exp_time}, temp={temp}")
-                return camera, gain, self._format_exposure_time(exp_time), temp
+                self.log(f"Exif header read for {path.name}: camera={camera}, gain={gain}, exposure={exposure}, temperature={temperature}")
+                return camera, gain, self._format_exposure_time(exposure), temperature
         except Exception as e:
             with open('debug.log', 'a') as f:
                 f.write(f"Failed to read exif header for {path.name}: {e}\n")
@@ -241,7 +242,7 @@ class AstroScannerCore:
             rot_m = re.search(r'_(?P<rotation>\d+)deg', file_name)
 
             if exp_m:
-                meta['exp'] = exp_m.group('exp')
+                meta['exposure'] = exp_m.group('exp')
             if bin_m:
                 meta['bin'] = bin_m.group('bin')
             if gain_m:
@@ -249,7 +250,7 @@ class AstroScannerCore:
             if ts_m:
                 meta['timestamp'] = ts_m.group(0)
             if temp_m:
-                meta['temp'] = temp_m.group('temp')
+                meta['temperature'] = temp_m.group('temp')
             if rot_m:
                 meta['rotation'] = rot_m.group('rotation')
 
@@ -295,38 +296,43 @@ class AstroScannerCore:
 
         # Try to read missing info from FITS header (only for FIT files that pass checks)
         if is_fit and config.FITS_AVAILABLE and (
-            not meta.get('camera') or not meta.get('gain') or not meta.get('temp') or not meta.get('filter')
+            not meta.get('camera') or not meta.get('gain') or not meta.get('temperature') or not meta.get('exposure') or not meta.get('filter')
         ):
             # Get the metadata from the FITS header
-            camera, gain, temp, filter_name = self._get_metadata_from_fits_header(path)
+            camera, gain, temperature, exposure, filter = self._get_metadata_from_fits_header(path)
             if camera:
                 meta['camera'] = camera
                 session.camera = meta['camera']
             if gain:
                 meta['gain'] = gain
                 session.gain = meta['gain']
-            if temp:
-                meta['temp'] = temp
-                session.temperature = meta['temp']
-            if filter_name:
-                meta['filter'] = config.identify_filter(filter_name)
+            if temperature:
+                meta['temperature'] = temperature
+                session.temperature = meta['temperature']
+            if exposure:
+                meta['exposure'] = exposure
+                session.exposure = meta['exposure']
+            if filter:
+                meta['filter'] = config.identify_filter(filter)
                 session.filter = meta['filter']
 
         # Try to read missing camera from EXIF (for non-FIT files)
-        if not is_fit and config.EXIF_AVAILABLE and not meta.get('camera'):
-            camera, gain, exp_time, temp = self._get_metadata_from_exif(path)
+        if not is_fit and config.EXIF_AVAILABLE and ( 
+            not meta.get('camera') or not meta.get('gain') or not meta.get('temperature') or not meta.get('exposure')
+        ):
+            camera, gain, exposure, temperature = self._get_metadata_from_exif(path)
             if camera:
                 meta['camera'] = camera
                 session.camera = meta['camera']
             if gain:
                 meta['gain'] = gain
                 session.gain = meta['gain']
-            if exp_time:
-                meta['exp'] = exp_time
-                session.exposure = meta['exp']
-            if temp:
-                meta['temp'] = temp
-                session.temperature = meta['temp']
+            if exposure:
+                meta['exposure'] = exposure
+                session.exposure = meta['exposure']
+            if temperature:
+                meta['temperature'] = temperature
+                session.temperature = meta['temperature']
 
         # As a last resort, try to identify filter from session folder name if not found in filename or FITS header
         if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
@@ -354,10 +360,10 @@ class AstroScannerCore:
             'Filter': meta.get('filter', 'Broadband/Unknown'),
             'Camera': meta.get('camera', ''),
             'Telescope': telescope or '',
-            'Exposure': meta.get('exp', '0'),
+            'Exposure': meta.get('exposure', '0'),
             'Bin': meta.get('bin', '1'),
             'Gain': meta.get('gain', ''),
-            'Temp': meta.get('temp', ''),
+            'Temp': meta.get('temperature', ''),
             'Rotation': meta.get('rotation', ''),
             'Timestamp': meta.get('timestamp', ''),
             'Session Folder': session_info or '',
