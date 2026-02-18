@@ -348,6 +348,9 @@ class AstroScannerCore:
         # 3. Metadata from the filename using regex and keyword searches
         meta = self._get_medata_from_filename(file_name)
 
+        # Move filter keywords out of the 'camera' field before syncing with session, since they are more likely to be consistent across the session and we want to cache them if found in the filename
+        meta = self._cleanup_parsed_metadata(meta, file_name)
+
         # 4. Metadata from the file header using the appropriate extractor based on file extension
         # get the extractor functions based on file extension and extract metadata from the file header if possible
         ext = path.suffix.lower()
@@ -375,9 +378,8 @@ class AstroScannerCore:
             self.log(f"Note: filename did not match expected patterns: {file_name}")
             return
 
-        # 8. Cleaning and then formatting the result
-        clean_meta = self._cleanup_parsed_metadata(meta, file_name)
-        return self._build_result_row(path, clean_meta, obj_name, telescope, session_info)
+        # 8. Formatting the result
+        return self._build_result_row(path, meta, obj_name, telescope, session_info)
 
     def _build_result_row(self, path, meta, obj_name, telescope, session_info):
         # Check both the session folder (parent) and the object folder (grandparent) for signs of edits.
