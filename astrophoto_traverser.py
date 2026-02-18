@@ -252,6 +252,19 @@ class AstroScannerCore:
             if match:
                 meta[key] = match.group('v')
 
+        # 2. Attempt to identify camera token
+        # Look for a alphanumeric token immediately following the 'Bin' marker
+        tokens = [t for t in re.split(r'[_\-]', file_name) if t]
+        bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
+        
+        if bin_indices:
+            bin_idx = bin_indices[0]
+            if bin_idx + 1 < len(tokens):
+                candidate = tokens[bin_idx + 1]
+                # If the next token looks like a camera name (alphanumeric only)
+                if re.match(r'^[A-Za-z0-9]+$', candidate):
+                    meta['camera'] = candidate
+
         return meta
 
     def _cleanup_parsed_metadata(self, meta, file_name):
@@ -276,20 +289,7 @@ class AstroScannerCore:
                 meta['filter'] = config.identify_filter(meta['camera'])
             meta['camera'] = None
 
-        # 3. Attempt to identify camera token
-        # Look for a alphanumeric token immediately following the 'Bin' marker
-        tokens = [t for t in re.split(r'[_\-]', file_name) if t]
-        bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
-        
-        if bin_indices:
-            bin_idx = bin_indices[0]
-            if bin_idx + 1 < len(tokens):
-                candidate = tokens[bin_idx + 1]
-                # If the next token looks like a camera name (alphanumeric only)
-                if re.match(r'^[A-Za-z0-9]+$', candidate):
-                    meta['camera'] = candidate
-
-        # 4. Last-ditch attempt to find filter in the filename if still missing
+        # 3. Last-ditch attempt to find filter in the filename if still missing
         if not meta.get('filter'):
             for key, formal_name in config.FILTER_KEYWORDS.items():
                 # Look for filter keywords delimited by underscores or dashes
@@ -308,8 +308,7 @@ class AstroScannerCore:
             return False
 
         # Only include image files that start with "Preview_", "Light_", "CRW_", or "IMG_" and don't end with "_thn.jpg"
-        allowed_prefixes = ("Preview_", "Light_", "CRW_", "IMG_")
-        if not file_name.startswith(allowed_prefixes) or file_name.endswith("_thn.jpg"):
+        if not file_name.startswith(config.ALLOWED_FILE_PREFIXES) or file_name.endswith(config.SKIPPED_FILE_SUFFIXES):
             self.log(f"Skipping file: {file_name} (parent='{session_info}')")
             return False
         

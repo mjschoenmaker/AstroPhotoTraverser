@@ -28,6 +28,9 @@ FILE_TYPES = {
     '.jpg': 'exif',
     '.jpeg': 'exif'
 }
+# Define which files will be parsed for metadata
+ALLOWED_FILE_PREFIXES = ("Preview_", "Light_", "CRW_", "IMG_",)
+SKIPPED_FILE_SUFFIXES = ("_thn.jpg",)
 
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
