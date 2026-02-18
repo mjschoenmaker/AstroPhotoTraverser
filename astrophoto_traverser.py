@@ -70,27 +70,9 @@ class AstroScannerCore:
             curr_p = Path(current_dir)
             
             # 1. Check for edits in this specific folder (Shallow check)
-            has_edits_here = False
-            for f in files:
-                f_lower = f.lower()
-                if any(f_lower.endswith(ext) for ext in edit_indicators) or "stack" in f_lower:
-                    # Ignore calibration folder edits
-                    if not any(k in current_dir.lower() for k in config.CALIBRATION_KEYWORDS):
-                        has_edits_here = True
-                        break
-            
-            # Cache the result
-            # If this subfolder has edits, mark its parents as having edits too
-            if has_edits_here:
-                temp_p = curr_p
-                # Bubble up to the root to ensure parent session/object folders see it
-                while temp_p != root and temp_p != temp_p.parent:
-                    self.folder_edit_cache[str(temp_p)] = True
-                    temp_p = temp_p.parent
-            else:
-                # Only set to False if not already set to True by a deeper subfolder
-                if str(curr_p) not in self.folder_edit_cache:
-                    self.folder_edit_cache[str(curr_p)] = False
+            if self._has_edits_in_folder(files, current_dir):
+                # and if found, mark this folder and all parents up to the root in the cache as containing edits
+                self._bubble_up_edit_status(curr_p, root)
 
             # 2. Collect image files from this folder
             for f in files:
@@ -110,7 +92,32 @@ class AstroScannerCore:
                 self.progress(idx, total_files)      
         
         return data_rows
-    
+
+    def _bubble_up_edit_status(self, start_path, root_limit):
+        """Recursively marks parent folders as containing edits up to the root."""
+        temp_p = start_path
+        while temp_p != root_limit and temp_p != temp_p.parent:
+            self.folder_edit_cache[str(temp_p)] = True
+            temp_p = temp_p.parent
+
+    def _has_edits_in_folder(self, files, current_dir):
+        """
+        Encapsulates the logic for detecting image edits or stacked results.
+        Returns True if edit indicators are found and the folder is not a calibration directory.
+        """
+        edit_indicators = {'.tif', '.tiff', '.psd'}
+        
+        # 1. Look for edit-related file extensions or "stack" in the filename
+        for f in files:
+            f_lower = f.lower()
+            if any(f_lower.endswith(ext) for ext in edit_indicators) or "stack" in f_lower:
+                
+                # 2. Exclude calibration folders (darks, bias, flats) from triggering an 'Edit' flag
+                if not any(k in current_dir.lower() for k in config.CALIBRATION_KEYWORDS):
+                    return True
+                    
+        return False
+
     def save_to_csv(self, data_rows, output_path):
         """Handles the file IO for CSV generation."""
         if not data_rows:
