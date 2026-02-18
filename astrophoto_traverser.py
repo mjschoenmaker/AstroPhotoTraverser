@@ -75,7 +75,7 @@ class AstroScannerCore:
                 f_lower = f.lower()
                 if any(f_lower.endswith(ext) for ext in edit_indicators) or "stack" in f_lower:
                     # Ignore calibration folder edits
-                    if not any(k in current_dir.lower() for k in ["darks", "bias", "flats"]):
+                    if not any(k in current_dir.lower() for k in config.CALIBRATION_KEYWORDS):
                         has_edits_here = True
                         break
             
@@ -305,9 +305,9 @@ class AstroScannerCore:
             self.log(f"Skipping file: {file_name} (parent='{session_info}')")
             return False
         
-        # or that reside in a folder that include "darks","bias" or "flats"
+        # or that reside in a folder that indicate calibration frames (e.g., "darks", "bias", "flats")
         lower_path_str = str(path).lower()
-        if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
+        if any(keyword in lower_path_str for keyword in config.CALIBRATION_KEYWORDS):
             self.log(f"Skipping calibration file: {file_name} (parent='{session_info}')")
             return False
         

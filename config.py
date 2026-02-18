@@ -80,6 +80,8 @@ FILE_REGEX = re.compile(
 # Matches folder names starting with YYYYMMDD or YYYY-MM-DD (also allows underscores)
 DATE_FOLDER_RE = re.compile(r'^\d{4}[-_]?\d{2}[-_]?\d{2}')
 
+CALIBRATION_KEYWORDS = ['darks', 'bias', 'flats', 'calibration']
+
 def identify_filter(folder_name):
     for key, formal_name in FILTER_KEYWORDS.items():
         if re.search(r'\b' + re.escape(key) + r'\b', folder_name, re.IGNORECASE):
