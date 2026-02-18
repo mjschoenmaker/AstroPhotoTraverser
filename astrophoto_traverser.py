@@ -6,7 +6,7 @@ import re
 import time
 from pathlib import Path
 from threading import Thread
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from typing import Optional
 
 import config
@@ -26,6 +26,22 @@ class AstroScannerCore:
         # Cache values to avoid redundant folder scans using the SessionMetaData dataclass
         self.session_cache: dict[str, SessionMetadata] = {}
         self.folder_edit_cache = {}
+
+    def _sync_session_data(self, meta, session: SessionMetadata):
+            """
+            Private helper to synchronize found metadata with the session cache.
+            If a field is missing in meta, it pulls from the session.
+            If a field is present in meta, it updates the session.
+            """
+            for field in fields(session):
+                field_name = field.name
+                # 1. Pull from session if current file is missing the value
+                if not meta.get(field_name):
+                    meta[field_name] = getattr(session, field_name)
+                
+                # 2. Update session if we found a value (from filename or header)
+                if meta.get(field_name):
+                    setattr(session, field_name, meta[field_name])
 
     def scan_folder(self, root_path):
         root = Path(root_path)
@@ -274,45 +290,8 @@ class AstroScannerCore:
         
         session = self.session_cache[cache_key]
 
-        # Use cached camera from session if available
-        if not meta.get('camera') and session.camera is not None:
-            meta['camera'] = session.camera
-        elif meta.get('camera'):
-            session.camera = meta['camera']
-
-        # Use cached gain from session if available
-        if not meta.get('gain') and session.gain is not None:
-            meta['gain'] = session.gain
-        elif meta.get('gain'):
-            session.gain = meta['gain']
-
-        # Use cached exposure time from session if available
-        if not meta.get('exp') and session.exposure is not None:
-            meta['exp'] = session.exposure
-        elif meta.get('exp'):
-            session.exposure = meta['exp']
-
-        # Use cached temperature from session if available
-        if not meta.get('temp') and session.temperature is not None:
-            meta['temp'] = session.temperature
-        elif meta.get('temp'):
-            session.temperature = meta['temp']
-
-        # Use cached filter from session if available
-        if not meta.get('filter') and session.filter is not None:
-            meta['filter'] = session.filter
-        elif meta.get('filter'):
-            session.filter = meta['filter']         
-            meta['gain'] = session.gain
-        # Use cached exposure time from session if available
-        if not meta.get('exp') and session.exposure is not None:
-            meta['exp'] = session.exposure
-        # Use cached temperature from session if available
-        if not meta.get('temp') and session.temperature is not None:
-            meta['temp'] = session.temperature
-        # Use cached filter from session if available
-        if not meta.get('filter') and session.filter is not None:
-            meta['filter'] = session.filter
+        # Sync metadata with session cache, ensuring we pull from session if missing and update session if found
+        self._sync_session_data(meta, session)
 
         # Try to read missing info from FITS header (only for FIT files that pass checks)
         if is_fit and config.FITS_AVAILABLE and (
@@ -385,6 +364,7 @@ class AstroScannerCore:
             'Edits Detected': has_edits,
             'Path': str(path)
         }
+
 
 
 class AstroScannerApp(ctk.CTk):
