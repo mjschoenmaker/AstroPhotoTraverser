@@ -211,60 +211,15 @@ class AstroScannerCore:
             self.log(f"EXIF Error: {e}")
             return {}
 
-    # This method is the heart of the metadata extraction logic. It takes a file path and the root directory, and returns a dictionary of extracted metadata.
-    def _extract_metadata(self, path, root):
-        file_name = path.name
-
-        # First, extract basic metadata from the file path structure (Object, Telescope, Session)
-        obj_name, telescope, session_info = self._get_metadata_from_path(path, root)
-
-        # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
-        parent_name = (session_info or '').strip()
-        if not config.DATE_FOLDER_RE.match(parent_name):
-            self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
-            return
-
-        # Only include image files that start with "Preview_", "Light_", "CRW_", or "IMG_" and don't end with "_thn.jpg"
-        allowed_prefixes = ("Preview_", "Light_", "CRW_", "IMG_")
-        if not file_name.startswith(allowed_prefixes) or file_name.endswith("_thn.jpg"):
-            self.log(f"Skipping file: {file_name} (parent='{session_info}')")
-            return
-        
-        # or that reside in a folder that include "darks","bias" or "flats"
-        lower_path_str = str(path).lower()
-        if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
-            self.log(f"Skipping calibration file: {file_name} (parent='{session_info}')")
-            return
-
+    def _get_medata_from_filename(self, file_name):
+        """Filename parsing strategy: returns a dict of metadata."""
+        meta = {}
         # Try the strict regex first, fall back to tolerant searches
         match = config.FILE_REGEX.search(file_name)
         if match:
             meta = match.groupdict()
-            # Invalidate camera if it matches invalid patterns (e.g., starts with 'gain')
-            if meta.get('camera') and re.match(r'gain\d+', meta['camera'], re.IGNORECASE):
-                meta['camera'] = None
         else:
-            meta = {}
-            # tolerant individual field searches
-            exp_m = re.search(r'(?P<exp>[\d.]+)s', file_name)
-            bin_m = re.search(r'Bin(?P<bin>\d+)', file_name, re.IGNORECASE)
-            gain_m = re.search(r'gain(?P<gain>\d+)', file_name, re.IGNORECASE)
-            ts_m = re.search(r'(?P<timestamp>\d{8}-\d{6})', file_name)
-            temp_m = re.search(r'_(?P<temp>-?[\d]+(?:\.[\d]+)?)C', file_name)
-            rot_m = re.search(r'_(?P<rotation>\d+)deg', file_name)
-
-            if exp_m:
-                meta['exposure'] = exp_m.group('exp')
-            if bin_m:
-                meta['bin'] = bin_m.group('bin')
-            if gain_m:
-                meta['gain'] = gain_m.group('gain')
-            if ts_m:
-                meta['timestamp'] = ts_m.group(0)
-            if temp_m:
-                meta['temperature'] = temp_m.group('temp')
-            if rot_m:
-                meta['rotation'] = rot_m.group('rotation')
+            meta = self._fallback_token_search(file_name)
 
             # Attempt to identify camera token: look for token after Bin
             if 'camera' not in meta:
@@ -297,6 +252,124 @@ class AstroScannerCore:
                         meta['filter'] = formal_name
                         break
 
+        return self._cleanup_parsed_metadata(meta, file_name)
+
+    def _fallback_token_search(self, file_name):
+        """
+        Performs tolerant, individual regex searches for metadata when 
+        the main FILE_REGEX fails.
+        """
+        meta = {}
+        
+        # 1. Search for specific patterns independently
+        patterns = {
+            'exposure': r'(?P<v>[\d.]+)s',
+            'bin': r'Bin(?P<v>\d+)',
+            'gain': r'gain(?P<v>\d+)',
+            'temperature': r'_(?P<v>-?[\d]+(?:\.[\d]+)?)C',
+            'rotation': r'_(?P<v>\d+)deg',
+            'timestamp': r'(?P<v>\d{8}-\d{6})'
+        }
+
+        for key, pattern in patterns.items():
+            match = re.search(pattern, file_name, re.IGNORECASE)
+            if match:
+                meta[key] = match.group('v')
+
+        # 2. Attempt to identify camera token
+        # Look for a alphanumeric token immediately following the 'Bin' marker
+        tokens = [t for t in re.split(r'[_\-]', file_name) if t]
+        bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
+        
+        if bin_indices:
+            bin_idx = bin_indices[0]
+            if bin_idx + 1 < len(tokens):
+                candidate = tokens[bin_idx + 1]
+                # If the next token looks like a camera name (alphanumeric only)
+                if re.match(r'^[A-Za-z0-9]+$', candidate):
+                    meta['camera'] = candidate
+
+        return meta
+
+    def _cleanup_parsed_metadata(self, meta, file_name):
+        """
+        Sanitizes raw metadata extracted from filenames. 
+        Handles invalid patterns and cross-field mapping (e.g., camera vs. filter).
+        """
+
+        # Attempt to identify camera token: look for token after Bin
+        if 'camera' not in meta:
+            tokens = [t for t in re.split(r'[_\-]', file_name) if t]
+            bin_indices = [i for i, t in enumerate(tokens) if re.match(r'Bin\d+', t, re.IGNORECASE)]
+            if bin_indices:
+                bin_idx = bin_indices[0]
+                if bin_idx + 1 < len(tokens):
+                    candidate = tokens[bin_idx + 1]
+                    if re.match(r'^[A-Za-z0-9]+$', candidate):
+                        meta['camera'] = candidate
+
+        # 1. Invalidate camera if it matches non-camera patterns (e.g., 'gain120' or timestamps)
+        if meta.get('camera'):
+            # Check for 'gain' or 'ISO' prefixes often caught by loose regex
+            if re.match(r'(gain|ISO)\d+', meta['camera'], re.IGNORECASE):
+                meta['camera'] = None
+            # Check for pure numeric strings like timestamps or exposure (e.g., '20250405' or '180s')
+            elif re.match(r'^\d{8}$|^\d+s$', meta['camera']):
+                meta['camera'] = None
+
+        # 2. Invalidate camera if it is actually a known filter name
+        if meta.get('camera') and meta['camera'].lower() in config.FILTER_KEYWORDS:
+            # Move the value to filter if we don't have one yet
+            if not meta.get('filter'):
+                meta['filter'] = config.identify_filter(meta['camera'])
+            meta['camera'] = None
+
+        # 3. Last-ditch attempt to find filter in the filename if still missing
+        if not meta.get('filter'):
+            for key, formal_name in config.FILTER_KEYWORDS.items():
+                # Look for filter keywords delimited by underscores or dashes
+                if re.search(r'[_\-]' + re.escape(key) + r'[_\-]', file_name, re.IGNORECASE):
+                    meta['filter'] = formal_name
+                    break
+                    
+        return meta
+
+    def _is_valid_file(self, path, session_info):
+        file_name = path.name
+        # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
+        parent_name = (session_info or '').strip()
+        if not config.DATE_FOLDER_RE.match(parent_name):
+            self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
+            return False
+
+        # Only include image files that start with "Preview_", "Light_", "CRW_", or "IMG_" and don't end with "_thn.jpg"
+        allowed_prefixes = ("Preview_", "Light_", "CRW_", "IMG_")
+        if not file_name.startswith(allowed_prefixes) or file_name.endswith("_thn.jpg"):
+            self.log(f"Skipping file: {file_name} (parent='{session_info}')")
+            return False
+        
+        # or that reside in a folder that include "darks","bias" or "flats"
+        lower_path_str = str(path).lower()
+        if any(keyword in lower_path_str for keyword in ["darks", "bias", "flats"]):
+            self.log(f"Skipping calibration file: {file_name} (parent='{session_info}')")
+            return False
+        
+        return True
+
+    # This method is the heart of the metadata extraction logic. It takes a file path and the root directory, and returns a dictionary of extracted metadata.
+    def _extract_metadata(self, path, root):
+        file_name = path.name
+
+        # First, extract basic metadata from the file path structure (Object, Telescope, Session)
+        obj_name, telescope, session_info = self._get_metadata_from_path(path, root)
+
+        # Validate file based on naming and folder conventions before doing any heavy lifting
+        if not self._is_valid_file(path, session_info):
+            return None
+
+        # parse metadata from the filename using regex and keyword searches
+        meta = self._get_medata_from_filename(file_name)
+
         session_folder = str(path.parent)  # Cache based on the session folder
         if session_folder not in self.session_cache:
             self.session_cache[session_folder] = SessionMetadata()
@@ -316,7 +389,7 @@ class AstroScannerCore:
         # Sync metadata with session cache, ensuring we pull from session if missing and update session if found
         self._sync_session_data(meta, session)
 
-        # As a last resort, try to identify filter from session folder name if not found in filename or FITS header
+        # As a last resort, try to identify filter from session folder name if not found in filename or file header
         if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
             meta['filter'] = config.identify_filter(session_info)
             # cache filter if succesfully identified from session folder, since it's likely consistent for the session
@@ -328,6 +401,10 @@ class AstroScannerCore:
             self.log(f"Note: filename did not match expected patterns: {file_name}")
             return
 
+        # 6. Formatting the result
+        return self._build_result_row(path, meta, obj_name, telescope, session_info)
+
+    def _build_result_row(self, path, meta, obj_name, telescope, session_info):
         # Check both the session folder (parent) and the object folder (grandparent) for signs of edits.
         session_path_str = str(path.parent)
         object_path_str = str(path.parent.parent) if path.parent else None
@@ -352,7 +429,6 @@ class AstroScannerCore:
             'Edits Detected': has_edits,
             'Path': str(path)
         }
-
 
 
 class AstroScannerApp(ctk.CTk):
