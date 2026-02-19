@@ -14,6 +14,20 @@ def scanner():
     # Initialize scanner with dummy callbacks
     return AstroScannerCore(log_callback=lambda x: None, progress_callback=lambda x, y: None)
 
+@pytest.fixture
+def session_factory(tmp_path):
+    """Factory to create consistent astro-session structures on disk."""
+    def _create(target="M42", telescope="Redcat51", date="2024-02-07", filename="Light_001.fits"):
+        if telescope is None:
+            session_path = tmp_path / target / date
+        else:
+            session_path = tmp_path / target / telescope / date
+        session_path.mkdir(parents=True, exist_ok=True)
+        file_path = session_path / filename
+        file_path.write_text("dummy data")
+        return tmp_path, file_path
+    return _create
+
 def test_filename_regex_parsing(scanner, tmp_path):
     """
     Tests if the FILE_REGEX in config.py correctly identifies components
@@ -56,14 +70,15 @@ def test_get_metadata_from_path(scanner, tmp_path):
     assert telescope == "2000mm Telescope"
     assert session_info == "2024-02-07 Backyard UVIR"
 
-def test_filter_in_session(scanner, tmp_path):
+def test_filter_in_session(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard UVIR" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    # 1 line of code to set up the disk
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard UVIR", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_gain456_001.fits")
+
+
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -79,14 +94,12 @@ def test_filter_in_session(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "No"
 
-def test_filter_in_filename(scanner, tmp_path):
+def test_filter_in_filename(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -102,14 +115,12 @@ def test_filter_in_filename(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "No"
 
-def test_ignore_filter_in_session(scanner, tmp_path):
+def test_ignore_filter_in_session(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard L-Extreme" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard L-Extreme", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -125,14 +136,12 @@ def test_ignore_filter_in_session(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "No"
 
-def test_missing_telescope(scanner, tmp_path):
+def test_missing_telescope(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M105 - triplet in Leo" / "2024-02-07 Backyard UVIR" / "Light_M105_123deg_67.0s_-273C_Bin1_PlayerOne_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M105 - triplet in Leo", telescope=None, date="2024-02-07 Backyard UVIR", filename="Light_M105_123deg_67.0s_-273C_Bin1_PlayerOne_gain456_001.fits")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -148,19 +157,41 @@ def test_missing_telescope(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "No"
 
-def test_folder_with_tif_edits_in_session(scanner, tmp_path):
+def test_folder_with_tif_edits_in_session(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
 
-    # another file that simulates edits in the same session
-    path2 = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "This is a nice edit.tif"
+    # A TIF file that simulates edits in the same session
+    (root / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "This is a nice edit.tif").write_text("data")
+
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(root))
+
+    # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
+    assert result['Telescope'] == "2000mm Telescope"
+    assert result['Object'] == "M42"
+    assert result['Exposure'] == "67.0"
+    assert result['Bin'] == "1"
+    assert result['Camera'] == "PlayerOne"
+    assert result['Filter'] == "UV/IR Cut"
+    assert result['Gain'] == "456" 
+    assert result['Temp'] == "-273"
+    assert result['Rotation'] == "123"
+    assert result['Edits Detected'] == "Yes"
+
+def test_folder_with_tif_edits_in_session_subfolders(scanner, session_factory):
+    # Create a real folder structure
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
+
+    # A TIF file that simulates edits in the same session but is located in a subfolder
+    path2 = root / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "sub-folder" / "This is a nice edit.tif"
     path2.parent.mkdir(parents=True, exist_ok=True)
     path2.write_text("fake tif data") # create a dummy file
-
+ 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -176,47 +207,15 @@ def test_folder_with_tif_edits_in_session(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "Yes"
 
-def test_folder_with_tif_edits_in_session_subfolders(scanner, tmp_path):
+def test_folder_with_tif_edits_for_telescope(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
-
-    # another file that simulates edits in the same session
-    path2 = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "subfolder" / "sub-subfolder" / "This is a nice edit.tif"
-    path2.parent.mkdir(parents=True, exist_ok=True)
-    path2.write_text("fake tif data") # create a dummy file
-
-    # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
-
-    # Assert the logic inside the method works
-    assert len(results) == 1
-    result = results[0]
-    assert result['Telescope'] == "2000mm Telescope"
-    assert result['Object'] == "M42"
-    assert result['Exposure'] == "67.0"
-    assert result['Bin'] == "1"
-    assert result['Camera'] == "PlayerOne"
-    assert result['Filter'] == "UV/IR Cut"
-    assert result['Gain'] == "456" 
-    assert result['Temp'] == "-273"
-    assert result['Rotation'] == "123"
-    assert result['Edits Detected'] == "Yes"
-
-def test_folder_with_tif_edits_for_telescope(scanner, tmp_path):
-    # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
 
     # another file that simulates edits on the telescope level
-    path2 = tmp_path / "M42" / "2000mm Telescope" /  "This is a nice edit.tif"
-    path2.parent.mkdir(parents=True, exist_ok=True)
-    path2.write_text("fake tif data") # create a dummy file
+    (root / "M42" / "2000mm Telescope" /  "This is a nice edit.tif").write_text("data")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -232,19 +231,15 @@ def test_folder_with_tif_edits_for_telescope(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "Yes"
 
-def test_folder_with_psd_edits_in_session(scanner, tmp_path):
+def test_folder_with_psd_edits_in_session(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
 
     # another file that simulates edits in the same session
-    path2 = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "This is a nice edit.psd"
-    path2.parent.mkdir(parents=True, exist_ok=True)
-    path2.write_text("fake psd data") # create a dummy file
+    (root / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "This is a nice edit.psd").write_text("data")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -260,19 +255,15 @@ def test_folder_with_psd_edits_in_session(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "Yes"
 
-def test_folder_with_psd_edits_for_telescope(scanner, tmp_path):
+def test_folder_with_psd_edits_for_telescope(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
 
     # another file that simulates edits on the telescope level
-    path2 = tmp_path / "M42" / "2000mm Telescope" / "This is a nice edit.psd"
-    path2.parent.mkdir(parents=True, exist_ok=True)
-    path2.write_text("fake psd data") # create a dummy file
+    (root / "M42" / "2000mm Telescope" / "This is a nice edit.psd").write_text("data")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -288,19 +279,15 @@ def test_folder_with_psd_edits_for_telescope(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "Yes"
 
-def test_folder_with_stack_edits_in_session(scanner, tmp_path):
+def test_folder_with_stack_edits_in_session(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits") 
 
     # another file that simulates edits in the same session
-    path2 = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "This is a nice stacked result.fit"
-    path2.parent.mkdir(parents=True, exist_ok=True)
-    path2.write_text("fake file data") # create a dummy file
+    (root / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "This is a nice stacked result.fit").write_text("data")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1
@@ -316,19 +303,15 @@ def test_folder_with_stack_edits_in_session(scanner, tmp_path):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "Yes"
 
-def test_folder_with_stack_edits_for_telescope(scanner, tmp_path):
+def test_folder_with_stack_edits_for_telescope(scanner, session_factory):
     # Create a real folder structure
-    path = tmp_path / "M42" / "2000mm Telescope" / "2024-02-07 Backyard" / "Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits"
-    path.parent.mkdir(parents=True)
-    path.write_text("fake fits data") # create a dummy file
+    root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")
 
     # another file that simulates edits on the telescope level
-    path2 = tmp_path / "M42" / "2000mm Telescope" / "This is a nice stacked result.fit"
-    path2.parent.mkdir(parents=True, exist_ok=True)
-    path2.write_text("fake file data") # create a dummy file
+    (root / "M42" / "2000mm Telescope" / "This is a nice stacked result.fit").write_text("data")
 
     # Call the scan_folder method
-    results = scanner.scan_folder(str(tmp_path))
+    results = scanner.scan_folder(str(root))
 
     # Assert the logic inside the method works
     assert len(results) == 1

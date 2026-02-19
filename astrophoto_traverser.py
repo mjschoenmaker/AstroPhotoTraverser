@@ -232,7 +232,7 @@ class AstroScannerCore:
                 self.log(f"Error reading EXIF data for {path}: {e}")
             return {}
 
-    def _get_medata_from_filename(self, file_name):
+    def _get_metadata_from_filename(self, file_name):
         """Filename parsing strategy: returns a dict of metadata."""
         meta = {}
         # Try the strict regex first, fall back to tolerant searches
@@ -281,7 +281,7 @@ class AstroScannerCore:
 
         return meta
 
-    def _cleanup_parsed_metadata(self, meta, file_name):
+    def _cleanup_parsed_metadata(self, meta, file_name, session_info):
         """
         Sanitizes raw metadata extracted from filenames. 
         Handles invalid patterns and cross-field mapping (e.g., camera vs. filter).
@@ -300,17 +300,24 @@ class AstroScannerCore:
         if camera and str(camera).lower() in config.FILTER_KEYWORDS:
             # Move the value to filter if we don't have one yet
             if not meta.get('filter'):
-                meta['filter'] = config.identify_filter(meta['camera'])
+                meta['filter'] = meta['camera']
             meta['camera'] = None
 
-        # 3. Last-ditch attempt to find filter in the filename if still missing
+        # 3. Attempt to find filter in the filename if still missing
         if not meta.get('filter'):
             for key, formal_name in config.FILTER_KEYWORDS.items():
                 # Look for filter keywords delimited by underscores or dashes
                 if re.search(r'[_\-]' + re.escape(key) + r'[_\-]', file_name, re.IGNORECASE):
                     meta['filter'] = formal_name
                     break
-                    
+
+        # 4. If filter is still missing, attempt to identify it from the session folder name as a last resort, since it's likely consistent for the session
+        if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
+            meta['filter'] = config.identify_filter(session_info)
+
+        # Whatever the case, make sure that filter is set to a known value (either identified or "Broadband/Unknown")
+        meta['filter'] = config.identify_filter(meta.get('filter'))
+
         return meta
 
     def _is_valid_file(self, path, session_info):
@@ -367,10 +374,10 @@ class AstroScannerCore:
             return None
 
         # 3. Metadata from the filename using regex and keyword searches
-        meta = self._get_medata_from_filename(file_name)
+        meta = self._get_metadata_from_filename(file_name)
 
-        # Move filter keywords out of the 'camera' field before syncing with session, since they are more likely to be consistent across the session and we want to cache them if found in the filename
-        meta = self._cleanup_parsed_metadata(meta, file_name)
+        # Cleanup and cross-validate the parsed metadata to correct common misplacements (e.g., camera vs. filter)
+        meta = self._cleanup_parsed_metadata(meta, file_name, session_info)
 
         # This pulls values (like camera or filter) already found in previous files.
         self._sync_session_data(meta, session)
@@ -393,19 +400,12 @@ class AstroScannerCore:
         # 5. Syncing metadata with session cache to fill in missing values and ensure consistency
         self._sync_session_data(meta, session)
 
-        # 6. As a last resort, try to identify filter from session folder name if not found in filename or file header
-        if not meta.get('filter') or meta['filter'] in [None, 'Broadband/Unknown']:
-            meta['filter'] = config.identify_filter(session_info)
-            # cache filter if succesfully identified from session folder, since it's likely consistent for the session
-            if meta['filter'] not in [None, 'Broadband/Unknown']:
-                session.filter = meta['filter']
-       
-        # 7. If still missing major metadata, log a skipped-file note
+        # 6. If still missing major metadata, log a skipped-file note
         if not meta:
             self.log(f"Note: filename did not match expected patterns: {file_name}")
             return
 
-        # 8. Formatting the result
+        # 7. Formatting the result
         return self._build_result_row(path, meta, obj_name, telescope, session_info)
 
     def _build_result_row(self, path, meta, obj_name, telescope, session_info):
