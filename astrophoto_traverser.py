@@ -346,12 +346,14 @@ class AstroScannerCore:
         
         return True
 
-    def _needs_header_extraction(self, meta):
+    def _needs_header_extraction(self, ext, meta):
         """
         Returns True if critical metadata is missing. 
         As configured in config.REQUIRED_METADATA_FIELDS.
         """
-        return any(not meta.get(field) for field in config.REQUIRED_METADATA_FIELDS)
+        extraction_type = config.FILE_TYPES.get(ext)
+        required_fields = config.REQUIRED_METADATA_FIELDS.get(extraction_type, []) # type: ignore
+        return any(not meta.get(field) for field in required_fields)
 
     def _extract_metadata(self, path, root):
         """
@@ -392,7 +394,7 @@ class AstroScannerCore:
         extractor_func = self._extractors.get(ext)
         
         # Check if we are still missing critical info after syncing with session
-        if extractor_func and self._needs_header_extraction(meta):
+        if extractor_func and self._needs_header_extraction(ext, meta):
             # Get the metadata from the appropriate extractor
             extracted_meta = extractor_func(path)
             

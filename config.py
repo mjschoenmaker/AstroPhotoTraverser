@@ -37,7 +37,10 @@ CALIBRATION_KEYWORDS = ('darks', 'bias', 'flats')
 
 # Define properties which - if missing - are attempted to be read from FITS headers and/or EXIF data
 # eg. ['camera', 'filter', 'gain', 'temperature'] - this will slow down the scanning process.
-REQUIRED_METADATA_FIELDS = ['camera', 'gain'];
+REQUIRED_METADATA_FIELDS = { 
+    'fits': ['camera', 'gain', 'filter', 'temperature'], 
+    'exif': ['camera', 'gain'] 
+}
 
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
