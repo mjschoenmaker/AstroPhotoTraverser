@@ -115,6 +115,27 @@ def test_filter_in_filename(scanner, session_factory):
     assert result['Rotation'] == "123"
     assert result['Edits Detected'] == "No"
 
+def test_iso_in_filename(scanner, session_factory):
+    # Create a real folder structure
+    root, _ = session_factory(target="NGC7380", telescope="2000mm Telescope", date="2024-02-07 Backyard", filename="Light_NGC7380_123deg_300s_Bin1_Canon60D_ISO)_UVIR_20200917-024738_22C_0011.fit")
+
+    # Call the scan_folder method
+    results = scanner.scan_folder(str(root))
+
+    # Assert the logic inside the method works
+    assert len(results) == 1
+    result = results[0]
+    assert result['Telescope'] == "2000mm Telescope"
+    assert result['Object'] == "NGC7380"
+    assert result['Exposure'] == "300"
+    assert result['Bin'] == "1"
+    assert result['Camera'] == "Canon60D"
+    assert result['Filter'] == "UV/IR Cut"
+    assert result['Gain'] == None 
+    assert result['Temp'] == "22"
+    assert result['Rotation'] == "123"
+    assert result['Edits Detected'] == "No"
+
 def test_ignore_filter_in_session(scanner, session_factory):
     # Create a real folder structure
     root, _ = session_factory(target="M42", telescope="2000mm Telescope", date="2024-02-07 Backyard L-Extreme", filename="Light_M42_123deg_67.0s_-273C_Bin1_PlayerOne_UVIR_gain456_001.fits")

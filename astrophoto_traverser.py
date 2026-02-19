@@ -318,6 +318,11 @@ class AstroScannerCore:
         # Whatever the case, make sure that filter is set to a known value (either identified or "Broadband/Unknown")
         meta['filter'] = config.identify_filter(meta.get('filter'))
 
+        # If gain is a non numeric string, invalidate it
+        gain = meta.get('gain') 
+        if gain and not re.match(r'^\d+$', str(gain)):
+            meta['gain'] = None
+
         return meta
 
     def _is_valid_file(self, path, session_info):
@@ -391,6 +396,9 @@ class AstroScannerCore:
             # Get the metadata from the appropriate extractor
             extracted_meta = extractor_func(path)
             
+            # Cleanup and cross-validate the extracted metadata as well, since FITS headers can be messy and inconsistent
+            extracted_meta = self._cleanup_parsed_metadata(extracted_meta, file_name, session_info)
+
             # Sync the new findings back to the session cache for the next files
             self._sync_session_data(extracted_meta, session)
             
