@@ -26,6 +26,7 @@ class AstroScannerCore:
         # Cache values to avoid redundant folder scans using the SessionMetaData dataclass
         self.session_cache: dict[str, SessionMetadata] = {}
         self.folder_edit_cache = {}
+        self.stop_requested = False # Flag to signal stopping the scan if needed
 
         # Map the extraction methods
         method_map = {
@@ -67,6 +68,9 @@ class AstroScannerCore:
 
         # os.walk is often faster for large trees than Path.rglob
         for current_dir, dirs, files in os.walk(root_path):
+            if self.stop_requested:
+                return []
+
             curr_p = Path(current_dir)
             
             # 1. Check for edits in this specific folder (Shallow check)
@@ -84,6 +88,9 @@ class AstroScannerCore:
         self.log(f"Found {total_files} images. Extracting metadata...")
 
         for idx, path in enumerate(file_list, start=1):
+            if self.stop_requested:
+                return []
+
             row = self._extract_metadata(path, root)
             if row:
                 data_rows.append(row)
@@ -190,15 +197,20 @@ class AstroScannerCore:
             with config.fits.open(str(path), mode='readonly') as hdul:
                 header = hdul[0].header # type: ignore
                 # Return keys that match our dataclass fields
+
+                raw_filter = header.get('FILTER')
+                clean_filter = config.identify_filter(raw_filter) if raw_filter else None
                 return {
                     'camera': header.get('INSTRUME') or header.get('CAMERA'),
-                    'gain': str(header.get('GAIN', '')),
+                    'gain': str(header.get('GAIN', '') or header.get('ISO', '')),
                     'temperature': str(header.get('CCD-TEMP') or header.get('SET-TEMP', '')),
                     'exposure': str(header.get('EXPTIME', '')),
-                    'filter': config.identify_filter(header.get('FILTER'))
+                    'filter': clean_filter
                 }
         except Exception as e:
-            self.log(f"FITS Error: {e}")
+            with open('debug.log', 'a') as f:
+                f.write(f"Error reading FITS header for {path}: {e}\n") 
+                self.log(f"Error reading FITS header for {path}: {e}")
             return {}
 
     def _get_metadata_from_exif(self, path):
@@ -215,7 +227,9 @@ class AstroScannerCore:
                     'temperature': str(tags.get('EXIF CameraTemperature') or '')
                 }
         except Exception as e:
-            self.log(f"EXIF Error: {e}")
+            with open('debug.log', 'a') as f:
+                f.write(f"Error reading EXIF data for {path}: {e}\n")
+                self.log(f"Error reading EXIF data for {path}: {e}")
             return {}
 
     def _get_medata_from_filename(self, file_name):
@@ -241,7 +255,7 @@ class AstroScannerCore:
         patterns = {
             'exposure': r'(?P<v>[\d.]+)s',
             'bin': r'Bin(?P<v>\d+)',
-            'gain': r'gain(?P<v>\d+)',
+            'gain': r'(?:gain|ISO)(?P<v>\d+)',
             'temperature': r'_(?P<v>-?[\d]+(?:\.[\d]+)?)C',
             'rotation': r'_(?P<v>\d+)deg',
             'timestamp': r'(?P<v>\d{8}-\d{6})'
@@ -320,6 +334,13 @@ class AstroScannerCore:
         
         return True
 
+    def _needs_header_extraction(self, meta):
+        """
+        Returns True if critical metadata is missing. 
+        As configured in config.REQUIRED_METADATA_FIELDS.
+        """
+        return any(not meta.get(field) for field in config.REQUIRED_METADATA_FIELDS)
+
     def _extract_metadata(self, path, root):
         """
         Extracts metadata from the file using multiple strategies:
@@ -351,15 +372,21 @@ class AstroScannerCore:
         # Move filter keywords out of the 'camera' field before syncing with session, since they are more likely to be consistent across the session and we want to cache them if found in the filename
         meta = self._cleanup_parsed_metadata(meta, file_name)
 
-        # 4. Metadata from the file header using the appropriate extractor based on file extension
-        # get the extractor functions based on file extension and extract metadata from the file header if possible
+        # This pulls values (like camera or filter) already found in previous files.
+        self._sync_session_data(meta, session)
+
+        # 4. Conditional Extraction (The "Gatekeeper")
         ext = path.suffix.lower()
         extractor_func = self._extractors.get(ext)
-        if extractor_func:
+        
+        # Check if we are still missing critical info after syncing with session
+        if extractor_func and self._needs_header_extraction(meta):
             # Get the metadata from the appropriate extractor
             extracted_meta = extractor_func(path)
-            # Sync with session cache to fill in any missing values
+            
+            # Sync the new findings back to the session cache for the next files
             self._sync_session_data(extracted_meta, session)
+            
             # Update meta with any new info found from the file header
             meta.update({k: v for k, v in extracted_meta.items() if v})
 
@@ -412,6 +439,10 @@ class AstroScannerApp(ctk.CTk):
     def __init__(self):
         super().__init__()
 
+        # Bind the Escape key to allow users to stop the scan
+        self.bind('<Escape>', self.request_stop)
+        self.core = None  # Will hold the AstroScannerCore instance   
+
         # Window Setup
         self.title("Astro-Inventory Manager")
         self.geometry("700x500")
@@ -447,6 +478,11 @@ class AstroScannerApp(ctk.CTk):
         self.status_box.pack(pady=10)
 
         self.selected_path = ""
+
+    def request_stop(self, event=None):
+        if self.core:
+            self.log("Stop requested. Attempting to halt the scan...")
+            self.core.stop_requested = True
 
     def log(self, message):
         def _append():
@@ -512,7 +548,7 @@ class AstroScannerApp(ctk.CTk):
 
         # 2. Instantiate the logic engine with callbacks 
         # This allows the logic to 'talk' to the UI without being 'part' of it
-        core = AstroScannerCore(
+        self.core = AstroScannerCore( # Store reference
             log_callback=self.log,
             progress_callback=self.update_progress
         )
@@ -522,11 +558,16 @@ class AstroScannerApp(ctk.CTk):
             start_time = time.time()
 
             # 3. Execute logic
-            data = core.scan_folder(self.selected_path)
+            data = self.core.scan_folder(self.selected_path)
 
             # --- Calculate Duration ---
             end_time = time.time()
             duration = end_time - start_time
+
+            if self.core.stop_requested:
+                self.log("Scan was stopped by the user.")
+                self.after(0, lambda: messagebox.showinfo("Scan Stopped", "The scan was stopped. Partial results may not be saved."))
+                return
 
             if not data:
                 self.after(0, lambda: messagebox.showwarning("No Data", "No compatible files were found."))
@@ -534,7 +575,7 @@ class AstroScannerApp(ctk.CTk):
 
             # 4. Save results        
             output_file = os.path.join(os.getcwd(), "astro_inventory.csv")
-            core.save_to_csv(data, output_file)
+            self.core.save_to_csv(data, output_file)
             
             # 5. Notify UI of completion
             self.log(f"SUCCESS: {len(data)} files indexed in {duration:.2f} seconds.")

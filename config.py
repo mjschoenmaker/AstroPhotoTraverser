@@ -32,6 +32,13 @@ FILE_TYPES = {
 ALLOWED_FILE_PREFIXES = ("Preview_", "Light_", "CRW_", "IMG_",)
 SKIPPED_FILE_SUFFIXES = ("_thn.jpg",)
 
+# Define keywords to identify and skip calibration frames (case-insensitive)
+CALIBRATION_KEYWORDS = ('darks', 'bias', 'flats')
+
+# Define properties which - if missing - are attempted to be read from FITS headers and/or EXIF data
+# eg. ['camera', 'filter', 'gain', 'temperature'] - this will slow down the scanning process.
+REQUIRED_METADATA_FIELDS = ['camera', 'gain'];
+
 # --- GLOBAL CONFIGURATION ---
 FILTER_KEYWORDS = {
     'lxtrme': 'L-eXtreme',
@@ -70,20 +77,18 @@ FILTER_KEYWORDS = {
 }
 
 FILE_REGEX = re.compile(
-    r'_(?P<exposure>[\d.]+)s'                # 180.0s
-    r'_Bin(?P<bin>\d+)'                 # Bin1
-    r'_(?P<camera>[^_]+)'               # 294MC
-    r'(?:_(?P<filter>[^_]+))?'          # optional filter
-    r'_gain(?P<gain>\d+)'               # gain120
-    r'_(?P<timestamp>\d{8}-\d{6})'      # 20250405-214232
-    r'_(?P<temperature>-?[\d]+(?:\.[\d]+)?)C'  # -10C or -10.5C
-    r'_(?P<rotation>\d+)deg'            # 90deg
+    r'_(?P<exposure>[\d.]+)s'                   # 180.0s
+    r'_Bin(?P<bin>\d+)'                         # Bin1
+    r'_(?P<camera>[^_]+)'                       # 294MC
+    r'(?:_(?P<filter>[^_]+))?'                  # optional filter
+    r'_(?:gain|ISO)(?P<gain>\d+)'               # gain120 or ISO1600
+    r'_(?P<timestamp>\d{8}-\d{6})'              # 20250405-214232
+    r'_(?P<temperature>-?[\d]+(?:\.[\d]+)?)C'   # -10C or -10.5C
+    r'_(?P<rotation>\d+)deg'                    # 90deg
 )
 
 # Matches folder names starting with YYYYMMDD or YYYY-MM-DD (also allows underscores)
 DATE_FOLDER_RE = re.compile(r'^\d{4}[-_]?\d{2}[-_]?\d{2}')
-
-CALIBRATION_KEYWORDS = ['darks', 'bias', 'flats', 'calibration']
 
 def identify_filter(folder_name):
     for key, formal_name in FILTER_KEYWORDS.items():
