@@ -316,7 +316,8 @@ class AstroScannerCore:
             meta['filter'] = config.identify_filter(session_info)
 
         # Whatever the case, make sure that filter is set to a known value (either identified or "Broadband/Unknown")
-        meta['filter'] = config.identify_filter(meta.get('filter'))
+        if (meta.get('filter') and meta['filter'] not in config.FILTER_KEYWORDS.values()):
+            meta['filter'] = config.identify_filter(meta.get('filter'))
 
         # If gain is a non numeric string, invalidate it
         gain = meta.get('gain') 
