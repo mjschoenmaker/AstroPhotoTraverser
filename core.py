@@ -326,18 +326,18 @@ class AstroScannerCore:
         # Only include files whose immediate parent folder starts with a date (YYYYMMDD or YYYY-MM-DD)
         parent_name = (session_info or '').strip()
         if not config.DATE_FOLDER_RE.match(parent_name):
-            self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
+            # self.log(f"Skipping file not in date folder: {file_name} (parent='{session_info}')")
             return False
 
         # Only include image files that start with "Preview_", "Light_", "CRW_", or "IMG_" and don't end with "_thn.jpg"
         if not file_name.startswith(config.ALLOWED_FILE_PREFIXES) or file_name.endswith(config.SKIPPED_FILE_SUFFIXES):
-            self.log(f"Skipping file: {file_name} (parent='{session_info}')")
+            # self.log(f"Skipping file: {file_name} (parent='{session_info}')")
             return False
         
-        # or that reside in a folder that indicate calibration frames (e.g., "darks", "bias", "flats")
+        # Skip files that reside in a folder that indicate calibration frames (e.g., "darks", "bias", "flats")
         lower_path_str = str(path).lower()
         if any(keyword in lower_path_str for keyword in config.CALIBRATION_KEYWORDS):
-            self.log(f"Skipping calibration file: {file_name} (parent='{session_info}')")
+            # self.log(f"Skipping calibration file: {file_name} (parent='{session_info}')")
             return False
         
         return True
