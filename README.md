@@ -21,11 +21,32 @@ Whether you are organizing years of data or preparing files for a stacking proje
 
     One nice usage I got was just uploading the resulting CSV to Gemini and prompt it for detailed advise what to shoot that night from my location, with this as a result:
 
-| Time | Target (EdgeHD 925) | Target (GT81) | Notes |
-| :--- | :--- | :--- | :--- |
-| **19:30 - 23:00** | M82 / M81 (High in North) | Sh2-240 (High in West) | Best time for the Spaghetti Nebula before it sinks. |
-| **23:00 - 04:30** | NGC 4565 (Approaching Zenith) | Markarian's Chain (Rising in East) | Peak "Galaxy Season" conditions. |
-| **04:30+** | Pack up | Pack up | Moon rises / Dawn approaches. |
+
+>Here is your detailed shooting advice for both setups:
+>
+>**1. The High-Resolution Choice: EdgeHD 9.25 at f/7 (~1645mm)**
+>
+>Your inventory shows you have plenty of wide-field data on the "classics," but several prime high-resolution targets are missing from your EdgeHD logs.
+>
+>* **Target: M81 (Bode’s Galaxy)**
+>
+>   * **Why:** Surprisingly, your logs show zero high-resolution data for M81 with the EdgeHD (you only have wide-field and C8 data). This is the perfect time of year for it as it sits high in Ursa Major.
+>
+>   * **Goal:** Capture the intricate spiral arm details and the "Holmberg IX" dwarf galaxy nearby.
+>
+>   * **Filters:** Broadband (Luminance + RGB). If you have time, 1-2 hours of Ha can help pop the HII regions in the arms.
+>
+>**2. The Wide-Field Choice: William Optics GT81 at 385mm**
+>
+>At this focal length, you should focus on targets that are too large for the EdgeHD or require massive integration time to reveal faint structures.
+>
+>* **Target: Sh2-240 (The Spaghetti Nebula)**
+>
+>   * **Why:** You currently have only 4.3 hours of Ha data on this object. The Spaghetti Nebula is a massive (~3-degree) supernova remnant that fits your 385mm FOV perfectly but is notoriously faint. It is currently well-placed in Auriga.
+>
+>   * **Goal:** You need at least 15–20 hours total to make this "pop." Tonight is a great night to add a 6-hour block of OIII or more Ha.
+>
+>   * **Filters:** Narrowband (Ha and OIII).
 
 ## 🚀 Getting Started
 
