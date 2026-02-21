@@ -1,33 +1,5 @@
 import re
-try:
-    import astropy.io.fits as fits
-    FITS_AVAILABLE = True
-except ImportError:
-    fits = None
-    FITS_AVAILABLE = False
 
-try:
-    import exifread
-    EXIF_AVAILABLE = True
-except ImportError:
-    exifread = None
-    EXIF_AVAILABLE = False
-
-# Force PyInstaller to include astropy and exifread
-if False:
-    import astropy.io.fits
-    import exifread
-
-# --- FILE TYPE CONFIGURATION ---
-# Map file extensions to their respective metadata extraction methods    
-FILE_TYPES = {
-    '.fit': 'fits',
-    '.fits': 'fits',
-    '.cr2': 'exif',
-    '.dng': 'exif',
-    '.jpg': 'exif',
-    '.jpeg': 'exif'
-}
 # Define which files will be parsed for metadata
 ALLOWED_FILE_PREFIXES = ("Preview_", "Light_", "CRW_", "IMG_",)
 SKIPPED_FILE_SUFFIXES = ("_thn.jpg",)
@@ -36,6 +8,16 @@ EDIT_INDICATORS = ('.tif', '.tiff', '.psd') # files with these extensions are co
 # Define keywords to identify and skip calibration frames (case-insensitive)
 CALIBRATION_KEYWORDS = ('darks', 'bias', 'flats')
 
+# --- FILE TYPE CONFIGURATION ---
+# Map file extensions to their respective metadata extraction methods    
+FILE_TYPES = {
+    '.fit':     'fits',
+    '.fits':    'fits',
+    '.cr2':     'exif',
+    '.dng':     'exif',
+    '.jpg':     'exif',
+    '.jpeg':    'exif'
+}
 # Define properties which - if missing - are attempted to be read from FITS headers and/or EXIF data
 # eg. ['camera', 'filter', 'gain', 'temperature'] - this will slow down the scanning process.
 REQUIRED_METADATA_FIELDS = { 
