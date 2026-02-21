@@ -65,7 +65,7 @@ This project originates from how I personally store my astrophotography data. I 
             |-- YYYY-MM-DD Location with filter (if known)
                 |-- subs            
 ```
-In case certain files are found on telescope or session level, that can be identified as edits, the resulting CSV will flag it
+In case certain files are found on telescope or session level, that can be identified as edits, the resulting CSV will flag it allowing for discovery of those targets that have unprocessed data sitting on your harddrive. Perfect material for a lazy [**Stacking Sunday**](https://www.youtube.com/playlist?list=PL40pZwFiEpXPCwSy82MzCJp1QVy7tSKNx).
 
 ### Installation
 
