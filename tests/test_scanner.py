@@ -6,7 +6,7 @@ from unittest.mock import patch, MagicMock
 # Ensure the parent directory is in the path to find astrophoto_traverser and config
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from astrophoto_traverser import AstroScannerCore
+from core import AstroScannerCore
 import config
 
 @pytest.fixture
