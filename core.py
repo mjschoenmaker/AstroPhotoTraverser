@@ -6,6 +6,10 @@ from pathlib import Path
 from models import SessionMetadata
 from dataclasses import fields
 
+# Extractors available for different file types
+from extractors.fits_extractor import FitsExtractor
+from extractors.exif_extractor import ExifExtractor
+
 import config
 
 class AstroScannerCore:
@@ -17,17 +21,15 @@ class AstroScannerCore:
         self.folder_edit_cache = {}
         self.stop_requested = False # Flag to signal stopping the scan if needed
 
-        # Map the extraction methods
-        method_map = {
-            'fits': self._get_metadata_from_fits_header,
-            'exif': self._get_metadata_from_exif
-        }
-
-        # Map the file extensions to their respective extraction methods based on config
+        # 1. Initialize the extractors once
         self._extractors = {
-            ext: method_map[ext_type]
-            for ext, ext_type in config.FILE_TYPES.items()
+            'fits': FitsExtractor(),
+            'exif': ExifExtractor()
         }
+        
+        # 2. Map file extensions to which strategy to use
+        # (This uses the logic from your config.py)
+        self.extension_map = config.FILE_TYPES
 
     def scan_folder(self, root_path):
         root = Path(root_path)
@@ -170,62 +172,6 @@ class AstroScannerCore:
             telescope = path.parent.parent.name if path.parent and path.parent.parent else 'missing info'
             obj_name = path.parent.parent.parent.name if path.parent and path.parent.parent and path.parent.parent.parent else ''
             return obj_name, telescope, session_info
-
-    def _format_exposure_time(self, exp_time):
-        """Converts EXIF exposure time to a consistent string format in seconds."""
-        exp_str = str(exp_time)
-        if '/' in exp_str:
-            num, den = exp_str.split('/')
-            try:
-                exp_seconds = float(num) / float(den)
-                return f"{exp_seconds:.4f}".rstrip('0').rstrip('.')
-            except ValueError:
-                return exp_str  # Return original if conversion fails
-        else:
-            return exp_str  # Already in seconds format
-
-    def _get_metadata_from_fits_header(self, path):
-        """FITS strategy: returns a dict of metadata."""
-        if not config.FITS_AVAILABLE:
-            return {}
-        try:
-            with config.fits.open(str(path), mode='readonly') as hdul:
-                header = hdul[0].header # type: ignore
-                # Return keys that match our dataclass fields
-
-                raw_filter = header.get('FILTER')
-                clean_filter = config.identify_filter(raw_filter) if raw_filter else None
-                return {
-                    'camera': header.get('INSTRUME') or header.get('CAMERA'),
-                    'gain': str(header.get('GAIN', '') or header.get('ISO', '')),
-                    'temperature': str(header.get('CCD-TEMP') or header.get('SET-TEMP', '')),
-                    'exposure': str(header.get('EXPTIME', '')),
-                    'filter': clean_filter
-                }
-        except Exception as e:
-            with open('debug.log', 'a') as f:
-                f.write(f"Error reading FITS header for {path}: {e}\n") 
-                self.log(f"Error reading FITS header for {path}: {e}")
-            return {}
-
-    def _get_metadata_from_exif(self, path):
-        """EXIF strategy: returns a dict of metadata."""
-        if not config.EXIF_AVAILABLE:
-            return {}
-        try:
-            with open(str(path), 'rb') as f:
-                tags = config.exifread.process_file(f)
-                return {
-                    'camera': str(tags.get('Image Model') or ''),
-                    'gain': str(tags.get('EXIF ISOSpeedRatings') or ''),
-                    'exposure': self._format_exposure_time(tags.get('EXIF ExposureTime')),
-                    'temperature': str(tags.get('EXIF CameraTemperature') or '')
-                }
-        except Exception as e:
-            with open('debug.log', 'a') as f:
-                f.write(f"Error reading EXIF data for {path}: {e}\n")
-                self.log(f"Error reading EXIF data for {path}: {e}")
-            return {}
 
     def _get_metadata_from_filename(self, file_name):
         """Filename parsing strategy: returns a dict of metadata."""
@@ -378,13 +324,13 @@ class AstroScannerCore:
 
         # 4. Conditional Extraction (The "Gatekeeper")
         ext = path.suffix.lower()
-        extractor_func = self._extractors.get(ext)
-        
+        extractor_func = self._extractors.get(config.FILE_TYPES.get(ext, None)) # type: ignore
+
         # Check if we are still missing critical info after syncing with session
         if extractor_func and self._needs_header_extraction(ext, meta):
             # Get the metadata from the appropriate extractor
-            extracted_meta = extractor_func(path)
-            
+            extracted_meta = extractor_func.extract(path)
+
             # Cleanup and cross-validate the extracted metadata as well, since FITS headers can be messy and inconsistent
             extracted_meta = self._cleanup_parsed_metadata(extracted_meta, file_name, session_info)
 

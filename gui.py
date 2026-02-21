@@ -113,8 +113,6 @@ class AstroScannerApp(ctk.CTk):
         import sys
         with open('debug.log', 'a') as f:
             f.write(f"Python executable: {sys.executable}\n")
-            f.write(f"FITS_AVAILABLE: {config.FITS_AVAILABLE}\n")
-            f.write(f"EXIF_AVAILABLE: {config.EXIF_AVAILABLE}\n")
 
         # 1. Update UI state to 'Initializing' mode
         self.after(0, lambda: self.scan_button.configure(state="disabled"))
