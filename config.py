@@ -31,6 +31,7 @@ FILE_TYPES = {
 # Define which files will be parsed for metadata
 ALLOWED_FILE_PREFIXES = ("Preview_", "Light_", "CRW_", "IMG_",)
 SKIPPED_FILE_SUFFIXES = ("_thn.jpg",)
+EDIT_INDICATORS = ('.tif', '.tiff', '.psd') # files with these extensions are considered "edited" and will be marked as such in the output, but their metadata will not be extracted.
 
 # Define keywords to identify and skip calibration frames (case-insensitive)
 CALIBRATION_KEYWORDS = ('darks', 'bias', 'flats')

@@ -29,26 +29,9 @@ class AstroScannerCore:
             for ext, ext_type in config.FILE_TYPES.items()
         }
 
-    def _sync_session_data(self, meta, session: SessionMetadata):
-            """
-            Private helper to synchronize found metadata with the session cache.
-            If a field is missing in meta, it pulls from the session.
-            If a field is present in meta, it updates the session.
-            """
-            for field in fields(session):
-                field_name = field.name
-                # 1. Pull from session if current file is missing the value
-                if not meta.get(field_name):
-                    meta[field_name] = getattr(session, field_name)
-                
-                # 2. Update session if we found a value (from filename or header)
-                if meta.get(field_name):
-                    setattr(session, field_name, meta[field_name])
-
     def scan_folder(self, root_path):
         root = Path(root_path)
         valid_extensions = config.FILE_TYPES.keys()
-        edit_indicators = {'.tif', '.tiff', '.psd'}
         
         file_list = []
         data_rows = []
@@ -89,6 +72,41 @@ class AstroScannerCore:
         
         return data_rows
 
+    def save_to_csv(self, data_rows, output_path):
+        """Handles the file IO for CSV generation."""
+        if not data_rows:
+            return
+        keys = data_rows[0].keys()
+        with open(output_path, 'w', newline='', encoding='utf-8') as f:
+            dict_writer = csv.DictWriter(f, fieldnames=keys)
+            dict_writer.writeheader()
+            dict_writer.writerows(data_rows)
+
+    def _sync_session_data(self, meta, session: SessionMetadata):
+            """
+            Private helper to synchronize found metadata with the session cache.
+            If a field is missing in meta, it pulls from the session.
+            If a field is present in meta, it updates the session.
+            """
+            for field in fields(session):
+                field_name = field.name
+                # 1. Pull from session if current file is missing the value
+                if not meta.get(field_name):
+                    meta[field_name] = getattr(session, field_name)
+                
+                # 2. Update session if we found a value (from filename or header)
+                if meta.get(field_name):
+                    setattr(session, field_name, meta[field_name])
+
+    def _needs_header_extraction(self, ext, meta):
+        """
+        Returns True if critical metadata is missing. 
+        As configured in config.REQUIRED_METADATA_FIELDS.
+        """
+        extraction_type = config.FILE_TYPES.get(ext)
+        required_fields = config.REQUIRED_METADATA_FIELDS.get(extraction_type, []) # type: ignore
+        return any(not meta.get(field) for field in required_fields)
+
     def _bubble_up_edit_status(self, start_path, root_limit):
         """Recursively marks parent folders as containing edits up to the root."""
         temp_p = start_path
@@ -100,29 +118,17 @@ class AstroScannerCore:
         """
         Encapsulates the logic for detecting image edits or stacked results.
         Returns True if edit indicators are found and the folder is not a calibration directory.
-        """
-        edit_indicators = {'.tif', '.tiff', '.psd'}
-        
+        """        
         # 1. Look for edit-related file extensions or "stack" in the filename
         for f in files:
             f_lower = f.lower()
-            if any(f_lower.endswith(ext) for ext in edit_indicators) or "stack" in f_lower:
+            if any(f_lower.endswith(ext) for ext in config.EDIT_INDICATORS) or "stack" in f_lower:
                 
                 # 2. Exclude calibration folders (darks, bias, flats) from triggering an 'Edit' flag
                 if not any(k in current_dir.lower() for k in config.CALIBRATION_KEYWORDS):
                     return True
                     
         return False
-
-    def save_to_csv(self, data_rows, output_path):
-        """Handles the file IO for CSV generation."""
-        if not data_rows:
-            return
-        keys = data_rows[0].keys()
-        with open(output_path, 'w', newline='', encoding='utf-8') as f:
-            dict_writer = csv.DictWriter(f, fieldnames=keys)
-            dict_writer.writeheader()
-            dict_writer.writerows(data_rows)
 
     def _get_metadata_from_path(self, path, root):
         """
@@ -335,15 +341,6 @@ class AstroScannerCore:
             return False
         
         return True
-
-    def _needs_header_extraction(self, ext, meta):
-        """
-        Returns True if critical metadata is missing. 
-        As configured in config.REQUIRED_METADATA_FIELDS.
-        """
-        extraction_type = config.FILE_TYPES.get(ext)
-        required_fields = config.REQUIRED_METADATA_FIELDS.get(extraction_type, []) # type: ignore
-        return any(not meta.get(field) for field in required_fields)
 
     def _extract_metadata(self, path, root):
         """
