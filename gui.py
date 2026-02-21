@@ -95,6 +95,8 @@ class AstroScannerApp(ctk.CTk):
             self.status_box.delete("1.0", "end")
 
     def start_scan_thread(self):
+        # empty the status box
+        self.status_box.delete("1.0", "end")        
         # 1. Show the progress elements before starting
         self.progress_label.configure(text="Initializing...")
         self.progress_label.pack(pady=(10, 0), after=self.scan_button)
@@ -132,6 +134,9 @@ class AstroScannerApp(ctk.CTk):
             # 3. Execute logic
             data = self.core.scan_folder(self.selected_path)
 
+            counts = self.core.extractor_counts
+            breakdown = ",".join([f"{count} {name}" for name, count in counts.items()])
+
             # --- Calculate Duration ---
             end_time = time.time()
             duration = end_time - start_time
@@ -150,7 +155,11 @@ class AstroScannerApp(ctk.CTk):
             self.core.save_to_csv(data, output_file)
             
             # 5. Notify UI of completion
-            self.log(f"SUCCESS: {len(data)} files indexed in {duration:.2f} seconds.")
+            completion_msg = (
+                f"SUCCESS: {len(data)} files indexed in {duration:.2f} seconds "
+                f"({breakdown} files opened)"
+            )
+            self.log(completion_msg)
             self.after(0, lambda: messagebox.showinfo("Done", f"Scan complete!\nSaved to: {output_file}"))
         
         except Exception as e:

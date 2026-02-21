@@ -5,6 +5,7 @@ import re
 from pathlib import Path
 from models import SessionMetadata
 from dataclasses import fields
+from collections import Counter
 
 # Extractors available for different file types
 from extractors.fits_extractor import FitsExtractor
@@ -16,6 +17,8 @@ class AstroScannerCore:
     def __init__(self, log_callback=None, progress_callback=None):
         self.log = log_callback or (lambda x: None)
         self.progress = progress_callback or (lambda x, y: None)
+        self.extractor_counts = Counter()
+
         # Cache values to avoid redundant folder scans using the SessionMetaData dataclass
         self.session_cache: dict[str, SessionMetadata] = {}
         self.folder_edit_cache = {}
@@ -324,12 +327,14 @@ class AstroScannerCore:
 
         # 4. Conditional Extraction (The "Gatekeeper")
         ext = path.suffix.lower()
-        extractor_func = self._extractors.get(config.FILE_TYPES.get(ext, None)) # type: ignore
+        strategy = config.FILE_TYPES.get(ext, None)
+        extractor_func = self._extractors.get(strategy) # type: ignore
 
         # Check if we are still missing critical info after syncing with session
         if extractor_func and self._needs_header_extraction(ext, meta):
             # Get the metadata from the appropriate extractor
             extracted_meta = extractor_func.extract(path)
+            self.extractor_counts[strategy] += 1
 
             # Cleanup and cross-validate the extracted metadata as well, since FITS headers can be messy and inconsistent
             extracted_meta = self._cleanup_parsed_metadata(extracted_meta, file_name, session_info)
