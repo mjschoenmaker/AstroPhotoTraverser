@@ -12,12 +12,39 @@ Whether you are organizing years of data or preparing files for a stacking proje
 * **DSLR/RAW**: Or EXIF data for camera models that don't save in FITS format.
 * **Portable Output**: Generates a standard `astro_inventory.csv` which you can import into Excel, Google Sheets etc, for further analysis.
 
+## 🤖 Examples of use
+* Run statistics on your entire collection
+* Find out which object is your favorite
+* Or which telescope you've used the most
+* Be able to calculate the total amount of integration
+* Leverage AI tools on your dataset
+
+    One nice usage I got was just uploading the resulting CSV to Gemini and prompt it for detailed advise what to shoot that night from my location, with this as a result:
+
+| Time | Target (EdgeHD 925) | Target (GT81) | Notes |
+| :--- | :--- | :--- | :--- |
+| **19:30 - 23:00** | M82 / M81 (High in North) | Sh2-240 (High in West) | Best time for the Spaghetti Nebula before it sinks. |
+| **23:00 - 04:30** | NGC 4565 (Approaching Zenith) | Markarian's Chain (Rising in East) | Peak "Galaxy Season" conditions. |
+| **04:30+** | Pack up | Pack up | Moon rises / Dawn approaches. |
+
 ## 🚀 Getting Started
 
 ### Prerequisites
 
 * Python 3.10+
 * Dependencies: `customtkinter`, `astropy`, `exifread`
+
+### File structure
+This project originates from how I personally store my astrophotography data. I detailed the structure in this YouTube video [**Astrophotography File Management - How to organize your files**](https://www.youtube.com/watch?v=Io6awemQF88)
+
+```
+    Root
+    |-- Object Name
+        |-- Focal Length Telescope
+            |-- YYYY-MM-DD Location with filter (if known)
+                |-- subs            
+```
+In case certain files are found on telescope or session level, that can be identified as edits, the resulting CSV will flag it
 
 ### Installation
 
@@ -61,10 +88,12 @@ The output will be located in the `dist/` folder.
 * `astrophoto-traverser.py`: Main entry point and CustomTkinter UI.
 * `config.py`: Configuration for regex patterns and filter keyword mapping.
 * `astrophoto-traverser.spec`: PyInstaller configuration for bundling assets like `customtkinter` and `astropy`.
+* `extractors`: A folder with the extractor method for common file types.
 
 ## 🤝 Contributing
 
-Contributions are welcome! If you have a specific FITS header format or a new camera type that isn't being parsed correctly, please open an issue or submit a pull request.
+Contributions are welcome, but bear in mind that this tool is (for now at least) tightly coupled to the way I store my 
+Astrophotography collection.
 
 ## 📜 License
 
