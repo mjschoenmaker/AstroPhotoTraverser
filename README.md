@@ -48,6 +48,9 @@ Whether you are organizing years of data or preparing files for a stacking proje
 >
 >   * **Filters:** Narrowband (Ha and OIII).
 
+<img width="978" height="716" alt="image" src="https://github.com/user-attachments/assets/3cf8df64-8f3f-4b59-981f-7c40c9afb7f9" />
+
+
 ## 🚀 Getting Started
 
 ### Prerequisites
